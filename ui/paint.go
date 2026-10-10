@@ -717,6 +717,9 @@ func (p *Painter) drawBitmap(img *Bitmap, box Rect, fit Fit, radius [4]float32, 
 // scrollbars draws the thumbs of a scroll container whose content
 // overflows it.
 func (p *Painter) scrollbars(e *node) {
+	if e.flags&flagHideScrollbars != 0 {
+		return
+	}
 	st := e.st
 	rt := e.c.rt
 	theme := e.c.theme
@@ -780,8 +783,11 @@ type scrollGeometry struct {
 // edges by inset (top, right, bottom, left, ScrollbarInsets): those of the
 // directions its flags scroll that overflow, which leave each other the
 // corner where both show.
-func scrollBars(box Rect, inset [4]float32, w, h, x, y float32, flags uint32, width float32) scrollGeometry {
+func scrollBars(box Rect, inset [4]float32, w, h, x, y float32, flags uint64, width float32) scrollGeometry {
 	var g scrollGeometry
+	if flags&flagHideScrollbars != 0 {
+		return g
+	}
 	g.vertical = flags&flagScrollY != 0 && h > box.H+0.5
 	g.horizontal = flags&flagScrollX != 0 && w > box.W+0.5
 	corner := float32(0)

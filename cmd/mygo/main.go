@@ -30,6 +30,8 @@ Commands:
 	build                build production apps (a .app and a .dmg on macOS)
 	keygen               create the key pair that signs updates
 	doctor               check that the development environment is ready
+	ios                  iOS artifact verification and platform tooling
+	push                 configure an application's APNs sender
 	version              print the MyGo version
 
 Run "mygo <command> -h" for the flags of a command.
@@ -76,6 +78,10 @@ func main() {
 		err = runBuild(args)
 	case "doctor":
 		err = runDoctor(args)
+	case "ios":
+		err = runIOS(args)
+	case "push":
+		err = runPush(args)
 	case "keygen":
 		err = runKeygen(args)
 	case "sign-uninstaller": // run by makensis, see uninstallerSigning

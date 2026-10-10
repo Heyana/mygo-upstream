@@ -419,9 +419,11 @@ func coreLocal[T any](e *node, key any, init func() T) *T {
 
 // state is what the runtime keeps about an element from frame to frame.
 type state struct {
-	rt            *engine
-	pendingSubmit bool
-	noticeQueued  bool
+	gestureEnabled bool
+	gestures       []GestureEvent
+	rt             *engine
+	pendingSubmit  bool
+	noticeQueued   bool
 
 	id   uint64
 	seen uint64
@@ -431,7 +433,9 @@ type state struct {
 	x, y, w, h     float32
 	vx, vy, vw, vh float32
 	parent         uint64
-	flags          uint32
+	router         *Router
+	routerLevel    int
+	flags          uint64
 	cursor         Cursor
 	// tip marks an element with a tooltip (TooltipBase).
 	tip bool
@@ -515,11 +519,22 @@ type state struct {
 
 	// input, caret and takesText are those of the last frame's element
 	// (HandleInput, TextCaret).
-	input       func(InputEvent) bool
-	textClient  TextInputClient
-	textAdapter *textInputAdapter
-	caret       Rect
-	takesText   bool
+	input            func(InputEvent) bool
+	caret            Rect
+	caretFn          func() Rect
+	textContext      func() (string, int)
+	takesText        bool
+	touchScroll      bool
+	touchSelection   bool
+	inputOptions     InputOptions
+	inputAccessory   string
+	inputAction      func(string)
+	inputModifiers   Modifiers
+	inputConsumed    func()
+	inputComposing   bool
+	inputReleaseMods map[Key]Modifiers
+	textClient       TextInputClient
+	textAdapter      *textInputAdapter
 	// scope is the dialog the element was in, 0 for none, and anchor the
 	// element it was a popover of (AttachTo, PopoverBase).
 	scope, anchor uint64

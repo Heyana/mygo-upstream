@@ -54,6 +54,7 @@ type host interface {
 // the view function, lays them out, paints them and routes input to the
 // elements of the last frame. Main thread only, except where noted.
 type engine struct {
+	gestures        map[string]gestureCapture
 	owner           weak.Pointer[engine]
 	epoch           uint64
 	parts           []any
@@ -153,7 +154,20 @@ type engine struct {
 	chain       []uint64
 	pressed     *state
 	pressButton int
-	focused     uint64
+	touch       struct {
+		id                 uint64
+		active, scrolling  bool
+		keyboardTap        bool
+		selecting          bool
+		holdUntil          time.Time
+		scrollTarget       uint64
+		x, y, lastX, lastY float32
+		back               *Router
+		backEntry          *routeEntry
+		backWidth          float32
+		backLevel          int
+	}
+	focused uint64
 	// texts are selectable paragraphs in build order; selection spans those
 	// of one Selectable container (textselection.go).
 	texts         []*state
@@ -207,8 +221,10 @@ type engine struct {
 	// ime is the text input state the host has, and base the rune of the
 	// focused editor its text starts at.
 	ime struct {
-		state platform.TextInputState
-		base  int
+		state             platform.TextInputState
+		base              int
+		compositionID     uint64
+		compositionLength int
 	}
 	// drag is the value being dragged within the window.
 	drag        *valueDrag
@@ -279,7 +295,7 @@ type labelNode struct {
 type hit struct {
 	st    *state
 	r     Rect
-	flags uint32
+	flags uint64
 }
 
 type shortcutReg struct {
@@ -359,6 +375,7 @@ func (rt *engine) runFrame() {
 	rt.gen = rt.text.Generation()
 	rt.painted = [3]float32{w, h, scale}
 	rt.animating, rt.repainting, rt.repaintAt = false, false, time.Time{}
+	rt.advanceTouch()
 	rt.routeKeys()
 	if rt.drag != nil {
 		// The source's element is this frame's, if it builds one.
@@ -480,6 +497,9 @@ func (rt *engine) now() time.Time {
 // (SurfaceShown) rather than draw frames nobody sees, as browsers pause
 // the animation frames of windows out of sight.
 func (rt *engine) next() {
+	if rt.touch.active && !rt.touch.holdUntil.IsZero() {
+		rt.scheduleAt(rt.touch.holdUntil)
+	}
 	rt.redraw, rt.repaintDue, rt.held = false, time.Time{}, false
 	moving := rt.animating || rt.repainting || !rt.repaintAt.IsZero()
 	switch {
@@ -521,6 +541,9 @@ func (rt *engine) repaintNow() {
 // elements painted again when only drawings moved since, else a frame
 // built anew.
 func (rt *engine) surfaceFrame() {
+	if rt.touch.active && !rt.touch.holdUntil.IsZero() && !rt.now().Before(rt.touch.holdUntil) {
+		rt.redraw = false // A long press changes widget state, not just paint.
+	}
 	if w, h, scale := rt.host.size(); rt.redraw && !rt.inFrame && rt.c.root != nil &&
 		rt.painted == [3]float32{w, h, scale} && rt.text.Generation() == rt.gen {
 		rt.repaintFrame(w, h, scale)
@@ -553,6 +576,7 @@ func (rt *engine) repaintFrame(w, h, scale float32) {
 	rt.host.present(&rt.scene)
 	rt.stats.lap(phasePresent)
 	rt.text.EndFrame()
+	rt.updateTextInput()
 	rt.next()
 	rt.stats.end(rt)
 }
@@ -589,6 +613,7 @@ func (rt *engine) forgetInput() {
 		s.clicks, s.rightClicks, s.doubleClicks = 0, 0, 0
 		s.pressPending = false
 		s.dragX, s.dragY = 0, 0
+		s.gestures = nil
 		s.dropped = nil
 		s.droppedValue, s.hasDropped = nil, false
 		s.dataDropped = nil
@@ -803,7 +828,10 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	} else {
 		s.parent = 0
 	}
+	s.gestureEnabled = e.gestureEnabled
 	s.flags = e.flags
+	s.router = e.router
+	s.routerLevel = e.routerLevel
 	s.anchor = 0
 	if e.popover != nil {
 		s.anchor = e.popover.id
@@ -816,6 +844,13 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	s.cursor, s.tip = e.cursor, e.tip
 	s.role = e.role
 	s.input, s.caret, s.takesText = e.inputFn, e.caret, e.takesText
+	s.caretFn = e.caretFn
+	s.textContext = e.textContext
+	s.inputOptions = e.inputOptions
+	s.inputAccessory, s.inputAction = e.inputAccessory, e.inputAction
+	s.inputModifiers, s.inputConsumed = e.inputModifiers, e.inputConsumed
+	s.touchScroll = e.touchScroll
+	s.touchSelection = e.touchSelection
 	if s.textClient != e.textClient {
 		if s.textAdapter != nil {
 			s.textAdapter.release()

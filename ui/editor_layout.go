@@ -168,7 +168,7 @@ func (e *node) paintInput(p *Painter) {
 		p.clip = saved
 		return
 	}
-	if focused {
+	if focused && !e.c.rt.nativeSelection(e.st) {
 		for _, selected := range ed.selectedRanges() {
 			for _, r := range l.SelectionVisual(ed.displayIndex(selected.Start), ed.displayIndex(selected.End), false) {
 				p.Fill(Rect{ox + r.X, oy + r.Y, r.W, r.H}, ts.selectionColor(t), 0)
@@ -187,7 +187,7 @@ func (e *node) paintInput(p *Painter) {
 			p.Fill(Rect{ox + r.X, oy + r.Y + r.H - 2, r.W, 1}, ts.color, 0)
 		}
 	}
-	if focused && !ed.readOnly {
+	if focused && !ed.readOnly && !e.c.rt.nativeSelection(e.st) {
 		rt := e.c.rt
 		phase := time.Since(rt.blinkStart)
 		const blink = 530 * time.Millisecond

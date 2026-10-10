@@ -11,6 +11,9 @@ import (
 // event handles a surface event on the main thread. It reports whether
 // an element takes files dragged over or dropped at the event's position.
 func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
+	if ev.PointerType == platform.PointerTouch && rt.touchEvent(ev) {
+		return rt.touch.scrolling
+	}
 	if ev.Kind != platform.SurfaceFrame {
 		// Whatever the event changes, the next frame builds anew.
 		rt.redraw = false
@@ -27,6 +30,11 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	case platform.SurfaceFrame:
 		rt.surfaceFrame()
 	case platform.SurfaceResize:
+		if rt.touch.active && (rt.touch.selecting || rt.touch.scrollTarget != 0 && !rt.touch.scrolling) {
+			rt.cancelPointer()
+			rt.touch.active = false
+		}
+		rt.cancelTouchBack()
 		rt.requestFrame()
 	case platform.SurfaceShown:
 		if rt.held {
@@ -37,11 +45,24 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	case platform.PointerMove:
 		rt.pointerMove(x, y)
 	case platform.PointerDown:
+		previousFocus := rt.focused
 		rt.pointerMove(x, y)
 		rt.pointerDown(x, y, ev.Button, Modifiers(ev.Mods), ev.Clicks)
+		// UIKit must keep its first responder while deciding whether a contact
+		// is an interactive keyboard pan. A completed tap still blurs on Up;
+		// a native pan cancels the tap and keeps the editor until UIKit resigns it.
+		if ev.PointerType == platform.PointerTouch && rt.ime.state.Active && rt.ime.state.Options.Dismiss == "interactive" && rt.focused != previousFocus {
+			next := rt.states[rt.focused]
+			if next == nil || next.editor == nil {
+				rt.focused = previousFocus
+				rt.touch.keyboardTap = true
+			}
+		}
 	case platform.PointerUp:
 		rt.pointerMove(x, y)
 		rt.pointerUp(ev.Button, ev.Clicks)
+	case platform.PointerCancel:
+		rt.cancelPointer()
 	case platform.PointerLeave:
 		rt.pointerIn = false
 		if rt.pressed == nil {
@@ -51,6 +72,9 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 			rt.requestFrame()
 		}
 	case platform.PointerScroll:
+		if ev.PointerType == platform.PointerTouch && abs32(float32(ev.DY)) > abs32(float32(ev.DX)) {
+			rt.dismissKeyboardOnDrag()
+		}
 		rt.pointerMove(x, y)
 		rt.scroll(float32(ev.DX), float32(ev.DY), Modifiers(ev.Mods), ev.Precise)
 	case platform.KeyPressed:
@@ -64,16 +88,47 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 			rt.deliver(h, InputEvent{Kind: InputKeyUp, Key: Key(ev.Key), Mods: Modifiers(ev.Mods)})
 		}
 	case platform.TextInput:
-		rt.editEvent(rt.replaced(editEvent{kind: editInsert, text: ev.Text}, ev))
+		rt.ime.compositionID = 0
+		rt.editEvent(rt.replaced(editEvent{kind: editInsert, text: ev.Text, caret: ev.Caret, snapshot: ev.Snapshot}, ev))
 	case platform.TextComposition:
-		rt.editEvent(rt.replaced(editEvent{kind: editCompose, text: ev.Text, caret: ev.Caret}, ev))
+		if ev.Snapshot {
+			rt.ime.compositionID = rt.focused
+			n := len([]rune(ev.Text))
+			a, b := max(0, min(ev.MarkedStart, n)), max(0, min(ev.MarkedEnd, n))
+			rt.ime.compositionLength = n - max(0, b-a)
+		}
+		rt.editEvent(rt.replaced(editEvent{kind: editCompose, text: ev.Text, caret: ev.Caret, snapshot: ev.Snapshot, markedStart: ev.MarkedStart, markedEnd: ev.MarkedEnd}, ev))
+	case platform.TextSelectionChanged:
+		rt.editEvent(editEvent{kind: editSelect, from: rt.ime.base + ev.From, to: rt.ime.base + ev.To})
+	case platform.SurfaceKeyboardDismiss:
+		if s := rt.states[rt.focused]; s != nil {
+			s.inputComposing = false
+			clear(s.inputReleaseMods)
+		}
+		rt.focused = 0
+		rt.requestFrame()
+	case platform.SurfaceGesture:
+		taken = rt.gestureEvent(ev)
 	case platform.SurfaceCommand:
 		rt.editEvent(editEvent{kind: editCommand, text: ev.Text})
+	case platform.SurfaceInputAction:
+		if s := rt.states[ev.ID]; s != nil && ev.ID == rt.focused && s.inputAction != nil && s.flags&(flagDisabled|flagInert) == 0 {
+			s.inputAction(ev.Text)
+			rt.requestFrame()
+		}
 	case platform.SurfaceFocus:
 		rt.windowFocused = true
 		rt.blinkStart = time.Now()
 		rt.requestFrame()
 	case platform.SurfaceBlur:
+		if rt.touch.active {
+			// Losing focus may end a contact without another pointer event.
+			// Cancel its handlers and release arbitration for the next touch.
+			rt.cancelPointer()
+			rt.touch.active, rt.touch.scrolling = false, false
+			rt.pointerIn = false
+		}
+		rt.cancelTouchBack()
 		rt.windowFocused = false
 		rt.selection.dragging = false
 		// Keys let go of elsewhere never come back up here.
@@ -104,6 +159,10 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.accessibilityOn()
 	case platform.AccessAction:
 		rt.accessAction(ev)
+	}
+	if ev.PointerType == platform.PointerTouch && (ev.Kind == platform.PointerUp || ev.Kind == platform.PointerCancel) {
+		rt.pointerIn = false
+		rt.setHover(nil)
 	}
 	if ev.Kind != platform.SurfaceFrame {
 		// A press or Tab may have moved the focus: tell the host now, not
@@ -729,7 +788,7 @@ func (rt *engine) shortcut(id uint64, mods Modifiers, key Key) bool {
 }
 
 func (rt *engine) editEvent(ev editEvent) {
-	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && rt.windowFocused && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
+	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !ev.snapshot && !rt.snapshotTextInput(s) && rt.windowFocused && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
 		if ev.kind == editInsert || ev.kind == editCompose {
 			var r *TextInputRange
 			if ev.replace {
@@ -746,6 +805,9 @@ func (rt *engine) editEvent(ev editEvent) {
 		}
 	}
 	if h := rt.focusHandler(); h != nil && h.editor == nil {
+		if h.textContext != nil && rt.contextEdit(h, ev) {
+			return
+		}
 		kind := map[editKind]InputKind{editInsert: InputText, editCompose: InputCompose, editCommand: InputCommand}[ev.kind]
 		if kind != 0 && rt.deliver(h, InputEvent{Kind: kind, Text: ev.text, Caret: ev.caret}) {
 			rt.blinkStart = time.Now()
@@ -756,8 +818,8 @@ func (rt *engine) editEvent(ev editEvent) {
 	if s == nil || s.editor == nil {
 		return
 	}
-	// Selectable text takes the menus' commands, as Copy, not text.
-	if s.flags&flagEditable == 0 && (s.flags&flagSelectable == 0 || ev.kind != editCommand) {
+	// Selectable text takes selection changes and menu commands, not edits.
+	if s.flags&flagEditable == 0 && (s.flags&flagSelectable == 0 || ev.kind != editCommand && ev.kind != editSelect) {
 		return
 	}
 	if ev.kind == editCommand && rt.textSelectionCommand(s, ev.text) {
@@ -777,7 +839,7 @@ const imeContext = 512
 func (rt *engine) updateTextInput() {
 	var t platform.TextInputState
 	base := 0
-	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && rt.windowFocused && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
+	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !rt.snapshotTextInput(s) && rt.windowFocused && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
 		t.Active, t.Client = true, s.textAdapter
 		sel := s.textAdapter.Selection()
 		caret := sel.Caret()
@@ -788,10 +850,72 @@ func (rt *engine) updateTextInput() {
 		}
 	} else if s != nil && s.editor == nil && s.input != nil && s.takesText && rt.windowFocused {
 		// An element taking text itself: no text around the caret.
+		t.Options = s.inputOptions.nativeOptions()
 		t.Active = true
-		t.Caret = platform.RectF{X: float64(s.x + s.caret.X), Y: float64(s.y + s.caret.Y), W: float64(s.caret.W), H: float64(s.caret.H)}
+		if s.textContext != nil {
+			t.Text, t.Start = s.textContext()
+			t.Start = max(0, min(t.Start, len([]rune(t.Text))))
+			t.End = t.Start
+		}
+		r := s.caret
+		if s.caretFn != nil {
+			r = s.caretFn()
+		}
+		t.Caret = platform.RectF{X: float64(s.x + r.X), Y: float64(s.y + r.Y), W: float64(r.W), H: float64(r.H)}
+	} else if s != nil && s.editor != nil && s.flags&(flagEditable|flagSelectable) != 0 && (!s.editor.readOnly || rt.nativeSelection(s)) && rt.windowFocused {
+		ed := s.editor
+		r := ed.caretRect(s)
+		t.Active = true
+		t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+		t.ReadOnly = ed.readOnly
+		t.Password = ed.password
+		t.Multiline = ed.multiline
+		t.CanUndo, t.CanRedo = !ed.readOnly && len(ed.undo) > 0, !ed.readOnly && len(ed.redo) > 0
+		t.Options = ed.inputOptions
+		if !ed.password && t.Client == nil {
+			a, z := ed.selection()
+			base = max(0, a-imeContext)
+			end := min(ed.buf.n, z+imeContext)
+			// UIKit keeps its proxy unchanged while marked text exists. Pin
+			// the committed context to that proxy, even as a long composition
+			// accepts candidates past the usual surrounding-text boundary.
+			if rt.ime.compositionID == rt.focused {
+				base = min(rt.ime.base, ed.buf.n)
+				end = min(ed.buf.n, base+rt.ime.compositionLength)
+			}
+			t.Text, t.Start, t.End = ed.buf.slice(base, end), a-base, z-base
+		}
 	}
-	if t != rt.ime.state {
+	if t.Active {
+		s := rt.states[rt.focused]
+		t.Accessory, t.AccessoryID = s.inputAccessory, rt.focused
+		if s.editor != nil {
+			ed := s.editor
+			t.ReadOnly, t.Password, t.Multiline = ed.readOnly, ed.password, ed.multiline
+			t.CanUndo, t.CanRedo = !ed.readOnly && len(ed.undo) > 0, !ed.readOnly && len(ed.redo) > 0
+			t.Options = ed.inputOptions
+			if !ed.password && t.Client == nil {
+				a, z := ed.selection()
+				base = max(0, a-imeContext)
+				end := min(ed.buf.n, z+imeContext)
+				if rt.ime.compositionID == rt.focused {
+					base = min(rt.ime.base, ed.buf.n)
+					end = min(ed.buf.n, base+rt.ime.compositionLength)
+				}
+				t.Text, t.Start, t.End = ed.buf.slice(base, end), a-base, z-base
+			}
+			t.ID = rt.focused
+			t.Bounds = platform.RectF{X: float64(s.vx), Y: float64(s.vy), W: float64(s.vw), H: float64(s.vh)}
+		}
+	}
+	// Resigning a mobile keyboard can synchronously resize the surface. Keep
+	// it until a non-editable control's touch ends, so the control cannot move
+	// away from the finger between down and up. Text focus still changes now;
+	// switching between editors and losing window focus remain immediate.
+	if !t.Active && rt.ime.state.Active && rt.windowFocused && rt.touch.active && !rt.touch.scrolling && rt.pressed != nil {
+		return
+	}
+	if t != rt.ime.state || base != rt.ime.base {
 		if t.Client != rt.ime.state.Client {
 			if old, ok := rt.ime.state.Client.(*textInputAdapter); ok {
 				old.release()
@@ -805,7 +929,7 @@ func (rt *engine) updateTextInput() {
 // replaced makes an edit replace the runes an input method named, from
 // the text it was last given, rather than the selection.
 func (rt *engine) replaced(ev editEvent, sev platform.SurfaceEvent) editEvent {
-	if rt.ime.state.Client != nil {
+	if rt.ime.state.Client != nil && !sev.Snapshot {
 		if sev.Replace {
 			ev.replace, ev.from, ev.to = true, sev.From, sev.To
 		}
@@ -960,6 +1084,20 @@ func (e *node) Pressed() bool {
 // Focused reports whether the element has the keyboard focus.
 func (e *node) Focused() bool {
 	return e.hasState() && e.c.rt.focused == e.id && e.c.rt.windowFocused
+}
+
+// Blur clears keyboard focus and dismisses the software keyboard. It is useful
+// for a keyboard accessory's reading-mode action; the next input tap can focus
+// its editor again.
+func (c *context) Blur() {
+	if c.rt.focused != 0 {
+		if s := c.rt.states[c.rt.focused]; s != nil {
+			s.inputComposing = false
+			clear(s.inputReleaseMods)
+		}
+		c.rt.focused = 0
+		c.rt.requestFrame()
+	}
 }
 
 // FocusVisible reports whether the element has the keyboard focus and
@@ -1129,3 +1267,77 @@ func (rt *engine) modsChanged(mods Modifiers) {
 // or modifier event said: a view showing each row's shortcut while Cmd is
 // held reads it, and draws again as it changes.
 func (c *context) Modifiers() Modifiers { return c.rt.mods }
+
+// snapshotTextInput keeps built-in mobile editors on the surrounding-text
+// bridge; desktop editors use the indexed native-input client.
+func (rt *engine) snapshotTextInput(s *state) bool {
+	if s.editor == nil {
+		return false
+	}
+	if h, ok := rt.host.(interface{ snapshotTextInput() bool }); ok {
+		return h.snapshotTextInput()
+	}
+	if h, ok := rt.host.(interface{ nativeTextSelection() bool }); ok {
+		return h.nativeTextSelection()
+	}
+	return false
+}
+
+// Context-aware custom controls receive only the changed part of UIKit's
+// snapshot. Unchanged text must never be re-sent to a terminal/remote editor.
+func (rt *engine) contextEdit(s *state, ev editEvent) bool {
+	switch ev.kind {
+	case editSelect:
+		rt.deliver(s, InputEvent{Kind: InputSelection, Caret: ev.to, From: ev.from, To: ev.to})
+		return true
+	case editCompose:
+		if ev.snapshot {
+			text := []rune(ev.text)
+			a := max(0, min(ev.markedStart, len(text)))
+			b := max(a, min(ev.markedEnd, len(text)))
+			// Nine-key input can commit a candidate while continuing to compose.
+			// Reconcile committed context without treating candidate text as a
+			// software shortcut, then keep only the marked portion provisional.
+			s.inputComposing = true
+			rt.contextSnapshot(s, string(text[:a])+string(text[b:]), a, false)
+			rt.deliver(s, InputEvent{Kind: InputCompose, Text: string(text[a:b]), Caret: max(0, ev.caret-a)})
+			return true
+		}
+	case editInsert:
+		if ev.snapshot {
+			if !rt.contextSnapshot(s, ev.text, ev.caret, true) {
+				rt.deliver(s, InputEvent{Kind: InputCompose})
+			}
+			return true
+		}
+		if ev.replace {
+			rt.deliver(s, InputEvent{Kind: InputTextReplace, Text: ev.text, From: ev.from, To: ev.to, Caret: ev.from + len([]rune(ev.text))})
+			return true
+		}
+	}
+	return false
+}
+func (rt *engine) contextSnapshot(s *state, text string, caret int, modifiedDelete bool) bool {
+	before, after := []rune(rt.ime.state.Text), []rune(text)
+	a := 0
+	for a < min(len(before), len(after)) && before[a] == after[a] {
+		a++
+	}
+	b, z := len(before), len(after)
+	for b > a && z > a && before[b-1] == after[z-1] {
+		b--
+		z--
+	}
+	if a == b && a == z {
+		return false
+	}
+	// UIKit deletes surrounding text locally. Armed terminal modifiers must
+	// still reach the actual Delete key encoder, including its release.
+	if modifiedDelete && s.inputModifiers != 0 && !s.inputComposing && a == z && b == rt.ime.state.Start && caret == a {
+		rt.deliver(s, InputEvent{Kind: InputKeyDown, Key: KeyBackspace})
+		rt.deliver(s, InputEvent{Kind: InputKeyUp, Key: KeyBackspace})
+	} else {
+		rt.deliver(s, InputEvent{Kind: InputTextReplace, Text: string(after[a:z]), From: a, To: b, Caret: caret})
+	}
+	return true
+}

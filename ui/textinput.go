@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/egoist/mygo/internal/platform"
 	"slices"
 )
 
@@ -44,6 +45,7 @@ func textInputBase(c *context, value *string, multiline bool) *node {
 	}
 	e.textClient = ed.client
 	ed.multiline = multiline
+	ed.inputOptions = platform.TextInputOptions{}
 	if multiline && ed.area == nil {
 		ed.area = &area{reveal: true}
 	}

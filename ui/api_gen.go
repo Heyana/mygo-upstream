@@ -98,7 +98,12 @@ func (_handle *Route) View(c *Context, fn func(r *Route)) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(_handle.coreView(_ctx, func(r *Route) { fn(r) }))
+	return wrapElement(_handle.coreView(_ctx, func() func(r *Route) {
+		if fn == nil {
+			return nil
+		}
+		return func(r *Route) { fn(r) }
+	}()))
 }
 
 // View builds the page shown with fn, in a column taking the room it is
@@ -109,7 +114,12 @@ func (_handle *Router) View(c *Context, fn func(r *Route)) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(_handle.coreView(_ctx, func(r *Route) { fn(r) }))
+	return wrapElement(_handle.coreView(_ctx, func() func(r *Route) {
+		if fn == nil {
+			return nil
+		}
+		return func(r *Route) { fn(r) }
+	}()))
 }
 
 // Panel builds fn in the panel of the collapsible while it is open, and as
@@ -123,7 +133,12 @@ func (_handle CollapsibleParts) Panel(fn func()) Element {
 	}
 	_ctx := _parts.c
 	_ = _ctx
-	return wrapElement(_parts.Panel(func() { fn() }))
+	return wrapElement(_parts.Panel(func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // Progress returns how far the collapsible is open, from 0 closed to 1
@@ -198,7 +213,12 @@ func (_handle ComboboxParts) Popup(fn func(panel Element)) Element {
 	}
 	_ctx := _parts.c
 	_ = _ctx
-	return wrapElement(_parts.Popup(func(panel *node) { fn(wrapElement(panel)) }))
+	return wrapElement(_parts.Popup(func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}()))
 }
 
 // SetOpen opens or closes the popup.
@@ -263,6 +283,17 @@ func (_handle *Context) Announce(text string) {
 		return
 	}
 	_ctx.Announce(text)
+}
+
+// Blur clears keyboard focus and dismisses the software keyboard. It is useful
+// for a keyboard accessory's reading-mode action; the next input tap can focus
+// its editor again.
+func (_handle *Context) Blur() {
+	_ctx := _handle.build()
+	if _ctx == nil {
+		return
+	}
+	_ctx.Blur()
 }
 
 // CloseToast closes the toast with id, or every toast when id is empty,
@@ -331,7 +362,12 @@ func (_handle *Context) OpenURLThen(url string, done func(err error)) {
 	if _ctx == nil {
 		return
 	}
-	_ctx.OpenURLThen(url, func(err error) { done(err) })
+	_ctx.OpenURLThen(url, func() func(err error) {
+		if done == nil {
+			return nil
+		}
+		return func(err error) { done(err) }
+	}())
 }
 
 // Preferences returns the settings of the desktop that controls follow.
@@ -456,7 +492,12 @@ func (_handle *Context) ToastAction(message string, label string, action func())
 	if _ctx == nil {
 		return
 	}
-	_ctx.ToastAction(message, label, func() { action() })
+	_ctx.ToastAction(message, label, func() func() {
+		if action == nil {
+			return nil
+		}
+		return func() { action() }
+	}())
 }
 
 // Vibrancy reports whether the window shows its material
@@ -518,7 +559,12 @@ func Accordion(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreAccordion(_ctx, func() { fn() }))
+	return wrapElement(coreAccordion(_ctx, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // AccordionItem creates a section of an Accordion: a header showing title,
@@ -529,7 +575,12 @@ func AccordionItem(c *Context, title string, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreAccordionItem(_ctx, title, open, func() { fn() }))
+	return wrapElement(coreAccordionItem(_ctx, title, open, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // AlertDialog shows an alert over the window while *open is true, as
@@ -701,7 +752,12 @@ func CheckboxGroup(c *Context, label string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreCheckboxGroup(_ctx, label, func() { fn() }))
+	return wrapElement(coreCheckboxGroup(_ctx, label, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // Collapsible creates a disclosure, as SwiftUI's DisclosureGroup: label
@@ -717,7 +773,12 @@ func Collapsible(c *Context, label string, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreCollapsible(_ctx, label, open, func() { fn() }))
+	return wrapElement(coreCollapsible(_ctx, label, open, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // CollapsibleBase creates a collapsible without a look, open while *open:
@@ -854,7 +915,12 @@ func DialogBase(c *Context, open *bool, fn func(backdrop Element, panel Element)
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreDialogBase(_ctx, open, func(backdrop *node, panel *node) { fn(wrapElement(backdrop), wrapElement(panel)) }))
+	return wrapElement(coreDialogBase(_ctx, open, func() func(backdrop *node, panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(backdrop *node, panel *node) { fn(wrapElement(backdrop), wrapElement(panel)) }
+	}()))
 }
 
 // Divider creates a thin line across its row or column.
@@ -951,7 +1017,12 @@ func Field(c *Context, label string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreField(_ctx, label, func() { fn() }))
+	return wrapElement(coreField(_ctx, label, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // Fieldset creates a group of the fields that fn builds, under legend,
@@ -966,7 +1037,12 @@ func Fieldset(c *Context, legend string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreFieldset(_ctx, legend, func() { fn() }))
+	return wrapElement(coreFieldset(_ctx, legend, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // FindBar creates a bar for finding text while *open is true, as Safari's
@@ -1001,7 +1077,12 @@ func Form(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreForm(_ctx, func() { fn() }))
+	return wrapElement(coreForm(_ctx, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // ForwardButton creates a button going forward in r's history, as
@@ -1052,7 +1133,12 @@ func GridView(c *Context, s *GridState, n int, minWidth float32, height float32,
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreGridView(_ctx, s, n, minWidth, height, func(i int) { item(i) }))
+	return wrapElement(coreGridView(_ctx, s, n, minWidth, height, func() func(i int) {
+		if item == nil {
+			return nil
+		}
+		return func(i int) { item(i) }
+	}()))
 }
 
 // Icon creates an element showing an SVG as an icon: its shapes in the
@@ -1085,6 +1171,24 @@ func Image(c *Context, src ImageSource) Element {
 	return wrapElement(coreImage(_ctx, src))
 }
 
+// InputAccessoryBar draws actions as Go buttons, the way iOS shows an
+// InputAccessory above its keyboard, for platforms and tests without that
+// native view. It keeps the input's focus. Actions with Items open their
+// panel above the row while *expanded; a long press sends LongPressID. Draw
+// it below the focused input while it has the focus.
+func InputAccessoryBar(c *Context, actions []InputAction, expanded *bool, handler func(arg0 string)) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	return wrapElement(coreInputAccessoryBar(_ctx, actions, expanded, func() func(a0 string) {
+		if handler == nil {
+			return nil
+		}
+		return func(a0 string) { handler(a0) }
+	}()))
+}
+
 // Link creates a text that opens url in the browser when clicked, or
 // Enter while it has the focus. In a page of a Router, a path without a
 // scheme, as "/notes/42" or "edit", goes there in the router (Push).
@@ -1108,7 +1212,12 @@ func Local[T any](e Element, key any, init func() T) *T {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return coreLocal[T](e.nodeFor(_ctx.rt), key, func() T { return init() })
+	return coreLocal[T](e.nodeFor(_ctx.rt), key, func() func() T {
+		if init == nil {
+			return nil
+		}
+		return func() T { return init() }
+	}())
 }
 
 // MenuButton creates a button showing label and an arrow, which opens a
@@ -1127,7 +1236,12 @@ func MenuButton(c *Context, label string, build func(m *Menu)) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreMenuButton(_ctx, label, func(m *Menu) { build(m) }))
+	return wrapElement(coreMenuButton(_ctx, label, func() func(m *Menu) {
+		if build == nil {
+			return nil
+		}
+		return func(m *Menu) { build(m) }
+	}()))
 }
 
 // Meter creates a bar showing value between lo and hi, as AppKit's level
@@ -1151,14 +1265,24 @@ func Modal(c *Context, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreModal(_ctx, open, func() { fn() }))
+	return wrapElement(coreModal(_ctx, open, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // NewTester starts testing view in a window of width×height DIPs. Two
 // elements given one key under one parent make it panic where the second
 // was given, as apps only log it.
 func NewTester(view func(c *Context), width int, height int) *Tester {
-	return coreNewTester(func(c *context) { view(makeContext(c)) }, width, height)
+	return coreNewTester(func() func(c *context) {
+		if view == nil {
+			return nil
+		}
+		return func(c *context) { view(makeContext(c)) }
+	}(), width, height)
 }
 
 // NumberInput creates a text input editing *value as a number between lo
@@ -1201,7 +1325,17 @@ func Outline[K comparable](c *Context, s *OutlineState[K], roots []K, children f
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreOutline[K](_ctx, s, roots, func(a0 K) []K { return children(a0) }, func(item K) { row(item) }))
+	return wrapElement(coreOutline[K](_ctx, s, roots, func() func(a0 K) []K {
+		if children == nil {
+			return nil
+		}
+		return func(a0 K) []K { return children(a0) }
+	}(), func() func(item K) {
+		if row == nil {
+			return nil
+		}
+		return func(item K) { row(item) }
+	}()))
 }
 
 // OutlineTable creates an outline whose rows are a Table's, as AppKit's
@@ -1222,7 +1356,17 @@ func OutlineTable[K comparable](c *Context, s *OutlineState[K], columns []TableC
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreOutlineTable[K](_ctx, s, columns, roots, func(a0 K) []K { return children(a0) }, func(item K, col int) { cell(item, col) }))
+	return wrapElement(coreOutlineTable[K](_ctx, s, columns, roots, func() func(a0 K) []K {
+		if children == nil {
+			return nil
+		}
+		return func(a0 K) []K { return children(a0) }
+	}(), func() func(item K, col int) {
+		if cell == nil {
+			return nil
+		}
+		return func(item K, col int) { cell(item, col) }
+	}()))
 }
 
 // Overlay builds fn's elements above the rest of the window. Place them
@@ -1234,7 +1378,12 @@ func Overlay(c *Context, fn func()) {
 	if _ctx == nil {
 		return
 	}
-	coreOverlay(_ctx, func() { fn() })
+	coreOverlay(_ctx, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}())
 }
 
 // Popover shows fn's elements in a panel below anchor while *open is
@@ -1244,7 +1393,12 @@ func Popover(c *Context, anchor Element, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(corePopover(_ctx, anchor.nodeFor(_ctx.rt), open, func() { fn() }))
+	return wrapElement(corePopover(_ctx, anchor.nodeFor(_ctx.rt), open, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // PopoverBase shows a panel without a look below anchor while *open is
@@ -1264,7 +1418,12 @@ func PopoverBase(c *Context, anchor Element, open *bool, fn func(panel Element))
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(corePopoverBase(_ctx, anchor.nodeFor(_ctx.rt), open, func(panel *node) { fn(wrapElement(panel)) }))
+	return wrapElement(corePopoverBase(_ctx, anchor.nodeFor(_ctx.rt), open, func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}()))
 }
 
 // PrimaryButton creates a button in the accent color, for the main action.
@@ -1325,7 +1484,12 @@ func RadioGroup(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreRadioGroup(_ctx, func() { fn() }))
+	return wrapElement(coreRadioGroup(_ctx, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // RangeSlider creates a slider of two knobs setting *low and *high between
@@ -1359,7 +1523,12 @@ func Rating(c *Context, value *int, max int) Element {
 // Render draws a frame of view in a window of width×height DIPs at scale
 // device pixels per DIP, without a window: for snapshots and tests.
 func Render(view func(c *Context), width int, height int, scale float32) *image.RGBA {
-	return coreRender(func(c *context) { view(makeContext(c)) }, width, height, scale)
+	return coreRender(func() func(c *context) {
+		if view == nil {
+			return nil
+		}
+		return func(c *context) { view(makeContext(c)) }
+	}(), width, height, scale)
 }
 
 // RichText creates a text whose spans differ in style, over the style of
@@ -1543,7 +1712,12 @@ func Sidebar(c *Context, selected *string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSidebar(_ctx, selected, func() { fn() }))
+	return wrapElement(coreSidebar(_ctx, selected, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // SidebarItem creates an item of a Sidebar choosing id, showing label
@@ -1565,7 +1739,12 @@ func SidebarSection(c *Context, title string, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSidebarSection(_ctx, title, open, func() { fn() }))
+	return wrapElement(coreSidebarSection(_ctx, title, open, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // Slider creates a slider setting *value between lo and hi.
@@ -1635,7 +1814,17 @@ func Split(c *Context, size *float32, first func(), second func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSplit(_ctx, size, func() { first() }, func() { second() }))
+	return wrapElement(coreSplit(_ctx, size, func() func() {
+		if first == nil {
+			return nil
+		}
+		return func() { first() }
+	}(), func() func() {
+		if second == nil {
+			return nil
+		}
+		return func() { second() }
+	}()))
 }
 
 // SplitVertical is Split with first above second, *size its height.
@@ -1644,7 +1833,17 @@ func SplitVertical(c *Context, size *float32, first func(), second func()) Eleme
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSplitVertical(_ctx, size, func() { first() }, func() { second() }))
+	return wrapElement(coreSplitVertical(_ctx, size, func() func() {
+		if first == nil {
+			return nil
+		}
+		return func() { first() }
+	}(), func() func() {
+		if second == nil {
+			return nil
+		}
+		return func() { second() }
+	}()))
 }
 
 // StepSlider creates a slider setting *value to lo or a multiple of step
@@ -1727,7 +1926,12 @@ func Table(c *Context, s *ListState, columns []TableColumn, n int, cell func(row
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreTable(_ctx, s, columns, n, func(row int, col int) { cell(row, col) }))
+	return wrapElement(coreTable(_ctx, s, columns, n, func() func(row int, col int) {
+		if cell == nil {
+			return nil
+		}
+		return func(row int, col int) { cell(row, col) }
+	}()))
 }
 
 // Tabs creates a row of tabs showing labels, of which *selected is the
@@ -1926,7 +2130,12 @@ func ToastViewportBase(c *Context, fn func(viewport Element, toasts []Toast)) El
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreToastViewportBase(_ctx, func(viewport *node, toasts []Toast) { fn(wrapElement(viewport), toasts) }))
+	return wrapElement(coreToastViewportBase(_ctx, func() func(viewport *node, toasts []Toast) {
+		if fn == nil {
+			return nil
+		}
+		return func(viewport *node, toasts []Toast) { fn(wrapElement(viewport), toasts) }
+	}()))
 }
 
 // Toggle creates a button that stays pressed while *on, as Bold in an
@@ -1970,7 +2179,12 @@ func ToggleGroup(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreToggleGroup(_ctx, func() { fn() }))
+	return wrapElement(coreToggleGroup(_ctx, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // TokenField creates a field of tokens, as of tags or the recipients of a
@@ -2014,7 +2228,12 @@ func Toolbar(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreToolbar(_ctx, func() { fn() }))
+	return wrapElement(coreToolbar(_ctx, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // TooltipBase shows a tip without a look by anchor: fn styles the tip and
@@ -2044,7 +2263,12 @@ func TooltipBase(c *Context, anchor Element, fn func(tip Element)) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreTooltipBase(_ctx, anchor.nodeFor(_ctx.rt), func(tip *node) { fn(wrapElement(tip)) }))
+	return wrapElement(coreTooltipBase(_ctx, anchor.nodeFor(_ctx.rt), func() func(tip *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(tip *node) { fn(wrapElement(tip)) }
+	}()))
 }
 
 // Tree creates a tree, whose items TreeItem builds in fn. While an item
@@ -2063,7 +2287,12 @@ func Tree(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreTree(_ctx, func() { fn() }))
+	return wrapElement(coreTree(_ctx, func() func() {
+		if fn == nil {
+			return nil
+		}
+		return func() { fn() }
+	}()))
 }
 
 // TreeItem creates an item of a Tree showing label, inside the item it is
@@ -2076,7 +2305,12 @@ func TreeItem(c *Context, label string, open *bool, children func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreTreeItem(_ctx, label, open, func() { children() }))
+	return wrapElement(coreTreeItem(_ctx, label, open, func() func() {
+		if children == nil {
+			return nil
+		}
+		return func() { children() }
+	}()))
 }
 
 // View returns the content of a window whose user interface view builds,
@@ -2089,7 +2323,12 @@ func TreeItem(c *Context, label string, open *bool, children func()) Element {
 // something animates. A Content can serve several windows, each with its
 // own state.
 func View(view func(c *Context)) *Content {
-	return coreView(func(c *context) { view(makeContext(c)) })
+	return coreView(func() func(c *context) {
+		if view == nil {
+			return nil
+		}
+		return func(c *context) { view(makeContext(c)) }
+	}())
 }
 
 // Absolute takes the element out of its parent's layout and places it with
@@ -2596,7 +2835,12 @@ func (_handle Element) ContextMenu(build func(m *Menu)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.ContextMenu(func(m *Menu) { build(m) }))
+	return wrapElement(_node.ContextMenu(func() func(m *Menu) {
+		if build == nil {
+			return nil
+		}
+		return func(m *Menu) { build(m) }
+	}()))
 }
 
 // Cursor sets the pointer's shape over the element.
@@ -2738,7 +2982,12 @@ func (_handle Element) DragDataFrom(data func() transfer.Data, options ...transf
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.DragDataFrom(func() transfer.Data { return data() }, options...))
+	return wrapElement(_node.DragDataFrom(func() func() transfer.Data {
+		if data == nil {
+			return nil
+		}
+		return func() transfer.Data { return data() }
+	}(), options...))
 }
 
 // DragWindow makes the element a handle that moves the window, such as the
@@ -2787,7 +3036,12 @@ func (_handle Element) Draw(fn func(p *Painter, r Rect)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.Draw(func(p *Painter, r Rect) { fn(p, r) }))
+	return wrapElement(_node.Draw(func() func(p *Painter, r Rect) {
+		if fn == nil {
+			return nil
+		}
+		return func(p *Painter, r Rect) { fn(p, r) }
+	}()))
 }
 
 // DrawOver paints on the element with p after its children.
@@ -2798,7 +3052,12 @@ func (_handle Element) DrawOver(fn func(p *Painter, r Rect)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.DrawOver(func(p *Painter, r Rect) { fn(p, r) }))
+	return wrapElement(_node.DrawOver(func() func(p *Painter, r Rect) {
+		if fn == nil {
+			return nil
+		}
+		return func(p *Painter, r Rect) { fn(p, r) }
+	}()))
 }
 
 // DroppedFiles returns the paths of the files dropped on the element since
@@ -3099,6 +3358,19 @@ func (_handle Element) GapY(v float32) Element {
 	return wrapElement(_node.GapY(v))
 }
 
+// Gestures opts an element into pinch/rotation input and returns updates since
+// its last frame. A gesture stays with its starting element until it ends or
+// that element disappears. Currently iOS supplies these events.
+func (_handle Element) Gestures() []GestureEvent {
+	_node := _handle.node()
+	if _node == nil {
+		return nil
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Gestures()
+}
+
 // Gradient fills the element with a linear gradient from one color to
 // another, at angle degrees clockwise from upwards as in CSS: 180 goes
 // from top to bottom, 90 from left to right.
@@ -3168,7 +3440,12 @@ func (_handle Element) HandleInput(fn func(ev InputEvent) bool) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.HandleInput(func(ev InputEvent) bool { return fn(ev) }))
+	return wrapElement(_node.HandleInput(func() func(ev InputEvent) bool {
+		if fn == nil {
+			return nil
+		}
+		return func(ev InputEvent) bool { return fn(ev) }
+	}()))
 }
 
 // HandleTextInput connects an element to the system's text-input services.
@@ -3208,6 +3485,20 @@ func (_handle Element) HeightPercent(p float32) Element {
 	return wrapElement(_node.HeightPercent(p))
 }
 
+// HideScrollbars hides both scroll bars and their pointer targets. Scrolling,
+// keyboard navigation, accessibility and tracked offsets remain available.
+// Apply to Scroll, ScrollHorizontal, ScrollBoth, List, GridView or TextArea
+// each frame.
+func (_handle Element) HideScrollbars() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.HideScrollbars())
+}
+
 // Highlighted reports whether an option of a select is the one the pointer
 // or the arrows are on.
 func (_handle Element) Highlighted() bool {
@@ -3245,6 +3536,58 @@ func (_handle Element) ID() uint64 {
 	_ctx := _node.c
 	_ = _ctx
 	return _node.ID()
+}
+
+// InputAccessory attaches actions above the iOS system keyboard while this
+// input has focus. Other platforms ignore the native controls. The handler
+// runs on the UI thread without changing text focus or committing marked text.
+// Omit the call on later frames to remove the accessory.
+func (_handle Element) InputAccessory(actions []InputAction, handler func(arg0 string)) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.InputAccessory(actions, func() func(a0 string) {
+		if handler == nil {
+			return nil
+		}
+		return func(a0 string) { handler(a0) }
+	}()))
+}
+
+// InputModifiers adds software modifiers to ASCII text and control keys of
+// a custom HandleInput/TextCaret widget. It leaves IME composition, commits
+// and multi-character paste untouched. consumed runs on the UI thread after
+// a key is handled, allowing an app to release one-shot modifiers. Omitting
+// the call clears the modifiers. Standard text editors are unaffected.
+func (_handle Element) InputModifiers(mods Modifiers, consumed func()) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.InputModifiers(mods, func() func() {
+		if consumed == nil {
+			return nil
+		}
+		return func() { consumed() }
+	}()))
+}
+
+// InputOptions supplies this frame's keyboard traits for an editable field or
+// a custom HandleInput/TextCaret element, such as a terminal. Omitting the call
+// on a subsequent frame restores the default traits.
+func (_handle Element) InputOptions(o InputOptions) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.InputOptions(o))
 }
 
 // InsetShadow adds an inner box shadow, as CSS's box-shadow: inset: offset
@@ -3331,6 +3674,19 @@ func (_handle Element) JustifySelf(a Align) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.JustifySelf(a))
+}
+
+// KeepFocus preserves the current editor's focus when this element is
+// pressed. Keyboard navigation still focuses it normally. Use it for
+// input toolbars and selection actions that should keep an IME alive.
+func (_handle Element) KeepFocus() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.KeepFocus())
 }
 
 // Label names the element for assistive technology and for finding it in
@@ -3550,7 +3906,12 @@ func (_handle Element) Menu(build func(m *Menu)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.Menu(func(m *Menu) { build(m) }))
+	return wrapElement(_node.Menu(func() func(m *Menu) {
+		if build == nil {
+			return nil
+		}
+		return func(m *Menu) { build(m) }
+	}()))
 }
 
 func (_handle Element) MinHeight(v float32) Element {
@@ -3650,7 +4011,12 @@ func (_handle Element) OnPaste(fn func(text string) bool) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.OnPaste(func(text string) bool { return fn(text) }))
+	return wrapElement(_node.OnPaste(func() func(text string) bool {
+		if fn == nil {
+			return nil
+		}
+		return func(text string) bool { return fn(text) }
+	}()))
 }
 
 // Opacity makes the element and its children translucent.
@@ -4239,6 +4605,25 @@ func (_handle Element) TextCaret(r Rect) Element {
 	return wrapElement(_node.TextCaret(r))
 }
 
+// TextCaretFunc is TextCaret for a custom drawing whose cursor depends on its
+// final layout or rendered grid. fn runs on the UI thread after painting, so
+// the input method and the visible cursor use the same frame's geometry.
+// The returned rectangle is relative to the element's box.
+func (_handle Element) TextCaretFunc(fn func() Rect) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TextCaretFunc(func() func() Rect {
+		if fn == nil {
+			return nil
+		}
+		return func() Rect { return fn() }
+	}()))
+}
+
 // TextColor sets the color of text.
 func (_handle Element) TextColor(c Color) Element {
 	_node := _handle.node()
@@ -4248,6 +4633,27 @@ func (_handle Element) TextColor(c Color) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.TextColor(c))
+}
+
+// TextContext supplies committed surrounding text and its caret (in runes)
+// for a custom TextCaret handler. fn runs on the UI thread. The handler owns
+// the document and applies InputTextReplace and InputSelection events;
+// native composition remains virtual until committed. This does not create
+// an editor or change pointer selection/rendering. Use HandleTextInput when
+// full indexed geometry or document selection is required.
+func (_handle Element) TextContext(fn func() (string, int)) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TextContext(func() func() (string, int) {
+		if fn == nil {
+			return nil
+		}
+		return func() (string, int) { return fn() }
+	}()))
 }
 
 // TextRanges styles runs of a text input's text, in the frames that call
@@ -4316,6 +4722,32 @@ func (_handle Element) TopPercent(p float32) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.TopPercent(p))
+}
+
+// TouchScroll makes a custom input widget take finger drags as precise
+// InputScroll events. A stationary tap still delivers pointer Down/Up and
+// focuses the widget; a swipe does neither, so it can scroll without
+// opening the keyboard. Mouse input and pointer tracking are unchanged.
+func (_handle Element) TouchScroll() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TouchScroll())
+}
+
+// TouchSelection lets a TouchScroll widget reserve a stationary long press
+// for its InputLongPress handler. Moving before the hold still scrolls.
+func (_handle Element) TouchSelection() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TouchSelection())
 }
 
 // TrackLines keeps in l where the text area lays out its lines.
@@ -4543,7 +4975,12 @@ func (_handle SelectParts[T]) Popup(fn func(panel Element)) Element {
 	}
 	_ctx := _parts.c
 	_ = _ctx
-	return wrapElement(_parts.Popup(func(panel *node) { fn(wrapElement(panel)) }))
+	return wrapElement(_parts.Popup(func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}()))
 }
 
 // Tab creates tab i of the list: a row that takes the focus and chooses

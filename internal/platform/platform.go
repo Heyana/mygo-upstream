@@ -20,6 +20,13 @@ import (
 // ErrUnsupported is returned by features the current backend cannot provide.
 var ErrUnsupported = errors.New("not supported on this platform")
 
+// ApplicationHost is implemented when the OS owns the application loop.
+// RunApplication calls start and finish on the UI thread and waits off that
+// thread for shutdown. start initializes the backend; Ready follows it.
+type ApplicationHost interface {
+	RunApplication(start func() error, finish func()) error
+}
+
 // ErrNotificationsDenied is what ShowNotification fails with when the user
 // does not allow the app to show notifications.
 var ErrNotificationsDenied = errors.New("mygo: the user does not allow notifications")
@@ -46,6 +53,9 @@ type Color struct{ R, G, B, A uint8 }
 type Backend interface {
 	// Name identifies the backend, for example "darwin/wkwebview".
 	Name() string
+	// SystemManagedLifetime is true when the OS owns closing and quitting.
+	// This capability may be read before Init and from any goroutine.
+	SystemManagedLifetime() bool
 
 	// Init prepares the native application. It is called once, on the main
 	// thread, before Run.
@@ -81,6 +91,11 @@ type Backend interface {
 
 	App() AppController
 	Dialogs() Dialogs
+	Sharing() Sharing
+	Permissions() Permissions
+	SecureStorage() SecureStorage
+	Authenticator() Authenticator
+	Mobile() Mobile
 	Clipboard() Clipboard
 	Shell() Shell
 	Screen() Screen
@@ -126,6 +141,8 @@ type AppHandler interface {
 	Activated(hasVisibleWindows bool)
 	DidBecomeActive()
 	DidResignActive()
+	DidEnterBackground()
+	WillEnterForeground()
 	OpenURLs(urls []string)
 	OpenFiles(paths []string)
 	MenuItemClicked(id int)
@@ -565,15 +582,17 @@ type SaveDialogOptions struct {
 // MessageBoxOptions configures a message box.
 type MessageBoxOptions struct {
 	// Type is "none", "info", "error", "question" or "warning".
-	Type            string
-	Title           string
-	Message         string
-	Detail          string
-	Buttons         []string
-	DefaultID       int
-	CancelID        int
-	CheckboxLabel   string
-	CheckboxChecked bool
+	Type               string
+	Title              string
+	Message            string
+	Detail             string
+	Buttons            []string
+	DefaultID          int
+	CancelID           int
+	CheckboxLabel      string
+	CheckboxChecked    bool
+	Style              string
+	DestructiveButtons []int
 }
 
 // MessageBoxResult is the outcome of a message box.
@@ -587,6 +606,8 @@ type MessageBoxResult struct {
 type Dialogs interface {
 	ShowOpenDialog(parent Window, opts *OpenDialogOptions, cb func(paths []string, err error))
 	ShowSaveDialog(parent Window, opts *SaveDialogOptions, cb func(path string, err error))
+	ShowExportDialog(parent Window, opts *ExportDialogOptions, cb func(completed bool, err error))
+	ShowPhotoDialog(parent Window, opts *PhotoDialogOptions, cb func(paths []string, err error))
 	ShowMessageBox(parent Window, opts *MessageBoxOptions, cb func(res MessageBoxResult, err error))
 }
 
@@ -722,7 +743,7 @@ type Tray interface {
 	Destroy()
 }
 
-// Notification is a desktop notification.
+// Notification is a system notification.
 type Notification struct {
 	ID       string
 	Title    string
@@ -732,4 +753,8 @@ type Notification struct {
 	// Group gathers the notifications that share it (threadIdentifier on
 	// macOS).
 	Group string
+	// DelaySeconds is a one-shot local trigger; zero delivers immediately.
+	DelaySeconds float64
+	Badge        *int
+	Data         map[string]string
 }
