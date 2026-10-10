@@ -97,6 +97,7 @@ const (
 	dataMouseTracking  = 11
 	dataTitle          = 12
 	dataPwd            = 13
+	dataSelection      = 31
 	dataViewportActive = 32
 	dataMode           = 37
 	dataMouseShape     = 41
@@ -425,6 +426,53 @@ func (t *Terminal) SelectionText() (string, bool) {
 		call(fnFree, 0, p, n)
 	}
 	return s, true
+}
+
+// RowsJoined tests the actual wrap flag via the existing formatter. It
+// does not replace the user's selection or guess from a full-width row.
+func (t *Terminal) RowsJoined(row int) bool {
+	cols, rows := t.Size()
+	if row < 0 || row+1 >= rows {
+		return false
+	}
+	a, okA := t.CellAt(cols-1, row)
+	b, okB := t.CellAt(0, row+1)
+	if !okA || !okB {
+		return false
+	}
+	sel := Selection{size: unsafe.Sizeof(Selection{}), start: a, end: b}
+	opts := selectionFormatOptions{size: unsafe.Sizeof(selectionFormatOptions{}), unwrap: true, selection: uintptr(unsafe.Pointer(&sel))}
+	var p, n uintptr
+	if selectionFormatAlloc(t.h, 0, opts, &p, &n) != 0 {
+		return false
+	}
+	s := goString(p, n)
+	if p != 0 {
+		call(fnFree, 0, p, n)
+	}
+	return !strings.Contains(s, "\n")
+}
+
+// LogicalRowText joins only soft-wrapped visible rows, with column offsets
+// relative to startRow. Work is bounded to sixteen rows for pointer input.
+func (t *Terminal) LogicalRowText(row int) (text []rune, columns []int, startRow int) {
+	cols, rows := t.Size()
+	startRow = row
+	for startRow > 0 && row-startRow < 8 && t.RowsJoined(startRow-1) {
+		startRow--
+	}
+	end := row
+	for end+1 < rows && end-startRow < 15 && t.RowsJoined(end) {
+		end++
+	}
+	for y := startRow; y <= end; y++ {
+		r, c := t.RowText(y)
+		for i := range c {
+			c[i] += (y - startRow) * cols
+		}
+		text, columns = append(text, r...), append(columns, c...)
+	}
+	return
 }
 
 // Text returns the text of the screen and its scrollback, with

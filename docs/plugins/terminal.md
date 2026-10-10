@@ -155,6 +155,68 @@ term, err := terminal.New(terminal.Options{
   it, as does what it sends with `Send`. Keys that only type text may come
   as their text alone, as on Linux, and `OnKey` does not see those.
 
+## Search, selection and input
+
+Search belongs to the emulator, so finding text does not send keys to the
+program. The app supplies its own find bar:
+
+```go
+if err := term.SetSearch("error"); err != nil { /* report the error */ }
+state := term.SearchState() // Total, Current (1-based), Busy, Err
+term.SearchNext(1)          // older output; -1 moves toward newer output
+term.SetSearch("")          // clear highlights and release search state
+```
+
+Search is literal and ASCII case-insensitive, including scrollback. It scans
+incrementally with bounded work per frame; navigation waits for the scan.
+
+`SelectedText` returns the selection without touching the clipboard, and
+`SelectAll` selects available output. `SelectionAnchor` returns a view-relative
+rectangle after a pointer gesture, for an app's selection actions; it is
+unavailable during a drag. Long press starts touch selection, and dragging
+within 8 DIPs of the viewport edge scrolls through history.
+
+- `CopyOnSelect` opts into copying a completed nonempty selection. The default
+  keeps the clipboard until an explicit Copy action.
+- `CopyRawText` includes concealed characters. The default copies visible text;
+  both preserve visible punctuation, wrapping and rectangular selection.
+  `SetCopyRawText` switches modes without restarting the program.
+- `SelectOnDrag` lets primary-screen drags select locally even while a program
+  tracks the mouse. Clicks and scrolling still reach it; Alt bypasses the
+  override, Shift forces selection, and alternate-screen programs retain their
+  mouse protocol. `SetSelectOnDrag` changes this policy.
+- `SendKey(ui.Key, ui.Modifiers)` encodes accessory keys through the program's
+  keyboard protocol, including requested releases. Software modifiers attached
+  with `Element.InputModifiers` use the same encoder. Software Command+C/V/A
+  perform local clipboard actions.
+- `InputContext` opts into exposing locally typed, unsubmitted text for native
+  caret navigation. It does not buffer program input. `ActiveCursor` allows
+  blinking without keyboard focus, useful with a hidden software keyboard.
+- `InsertNewline` pastes a line break when bracketed paste is enabled, otherwise
+  sends Alt+Return. The application decides whether to expose that action.
+- `OnSubmit` runs on the UI thread after an unmodified Return release, receiving
+  persistent `ui.Services`; the key has already been queued.
+
+`OnOpenLink` receives a typed `Link` containing a URL or path and optional
+1-based line/column. It takes precedence over the existing `OpenLink` callback.
+File references support quoted paths, Unicode prose, wrapped lines and common
+compiler locations such as `file.go:12:3`, `file.ts(12,3)` and `file.go#L12C3`.
+Paths are recognized as clickable only when an app supplies either callback.
+The app resolves relative paths and decides how remote files open.
+
+## Rendering controls
+
+`Theme.MinimumContrast` optionally raises foreground contrast against the final
+cell background. `AdaptiveColors` optionally remaps neutral panels cached by a
+program across appearance changes; `SetAdaptiveColors` changes it live. These
+controls are disabled by default and do not alter emulator text or copying.
+
+Synchronized output holds the prior frame until the program commits. A watchdog
+releases it after one second without output, even with a hidden cursor. Active
+long redraws continue holding. `OnRenderEvent` reports `slow_sync` (updates of
+at least 250 ms) and `sync_timeout`, with a duration and no terminal contents.
+It runs on the reader or UI thread after emulator/render locks are released.
+
 ## Fonts
 
 `terminal.Font` holds what Ghostty's font options set:
@@ -269,6 +331,34 @@ term, err := terminal.New(terminal.Options{Conn: session})
 
 A terminal whose `Conn` never sends anything shows what the app writes
 with `Feed`, as a log with colors would.
+
+### Source-sized screens
+
+For a connection whose screen size is owned elsewhere, set both `FixedCols`
+and `FixedRows`. The decoder keeps those dimensions independently of the view;
+`FitToView` scales the font to fit the grid, otherwise the view follows the
+cursor within the larger grid. `SetFixedSize` and `SetFitToView` change these
+settings. Normal terminals continue resizing to their view.
+
+A connection can optionally supply dimensions with output:
+
+```go
+ReadScreen(buf []byte) (n, cols, rows int, err error)
+// Or supply complete replacement snapshots atomically:
+ReadScreenUpdate(buf []byte) (n, cols, rows int, snapshot []byte, err error)
+```
+
+`ReadScreenUpdate` takes precedence over `ReadScreen`, then ordinary `Read`.
+Positive dimensions update a configured fixed grid before decoding output.
+A nonempty snapshot replaces the screen and scrollback instead of appending
+`buf[:n]`; providers return either a snapshot or incremental bytes per call.
+The plugin preserves the reading position when retained history and dimensions
+allow it, or follows the bottom if the reader was already there. The connection
+owns framing, authentication and reconnection.
+
+`SetInputEnabled(false)` drops queued input and rejects new keys while retaining
+output and reading. Reenabling it does not replay discarded input. This leaves
+offline/read-only session policy to the app.
 
 ## The library
 

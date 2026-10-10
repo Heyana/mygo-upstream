@@ -20,19 +20,32 @@ import (
 // elsewhere; Shift+Page Up and Shift+Page Down scroll a page of the
 // scrollback, as does the wheel, unless the program takes the mouse. Hold
 // Shift to select while a program takes the mouse, and Command (Control
-// elsewhere) to open a link on click: a hyperlink (OSC 8), a URL printed as
-// text, or a file path with Options.OpenLink.
+// elsewhere) to open a hyperlink (OSC 8) on click.
 func View(c *ui.Context, t *Terminal) ui.Element {
 	v := t.viewOf(c)
-	e := ui.Box(c).Focusable().FocusRing(false).Clip().Label("Terminal")
+	v.linkMods = c.Modifiers()
+	e := ui.Box(c).Focusable().FocusRing(false).Cursor(ui.CursorText).Clip().Role(ui.RoleTextField).Label("Terminal")
 	v.build(c, e)
-	cursor := ui.CursorText
-	if v.hoverLink {
-		cursor = ui.CursorPointer
+	x, y, over := e.PointerPosition()
+	v.hover = linkMatch{}
+	if over && c.Modifiers()&ui.Cmd != 0 && v.cellW != 0 {
+		t.mu.Lock()
+		v.hover = v.linkAt(x, y)
+		t.mu.Unlock()
+		if v.hover.valid() {
+			e.Cursor(ui.CursorPointer)
+			label := v.hover.URL
+			if label == "" {
+				label = v.hover.Path
+			}
+			e.Tooltip("Open " + label)
+		}
 	}
-	e.Cursor(cursor)
-	e.HandleInput(v.input)
-	e.TextCaret(v.caret())
+	e.HandleInput(v.input).TouchSelection()
+	e.TextCaretFunc(v.caret)
+	if t.opts.InputContext {
+		e.TextContext(t.textContext)
+	}
 	e.Draw(v.paint)
 	e.ContextMenu(v.menu)
 	return e
@@ -60,24 +73,34 @@ type view struct {
 	t        *Terminal
 	services ui.Services
 
-	theme   *Theme
-	applied *Theme // the theme the emulator has
+	theme              *Theme
+	applied            *Theme // the theme the emulator has
+	adaptiveColors     bool
+	oppositeBackground ui.Color
 
 	// The grid, in device pixels: the cells, the baseline in a cell, and
 	// the origin of the grid relative to the element; scale is device
 	// pixels per DIP.
-	font                   fontKey
-	fonts                  [4]ui.Font
-	scale                  float32
-	cellW, cellH, baseline int
-	ox, oy                 int
-	cols, rows             int
+	font                             fontKey
+	fonts                            [4]ui.Font
+	fitKey                           fitFontKey
+	fittedFont                       fontKey
+	scale                            float32
+	cellW, cellH, baseline           int
+	ox, oy                           int
+	painted                          ui.Rect // the element's box when last painted
+	cols, rows                       int
+	fixedGrid, followCursor          bool
+	panX, panY, viewportW, viewportH int
 
-	colors    vt.Colors
-	cursor    vt.Cursor
-	scrollbar vt.Scrollbar
-	lines     []rowCache
-	shaped    lru
+	colors        vt.Colors
+	cursor        vt.Cursor
+	scrollbar     vt.Scrollbar
+	searchMatches []vt.Selection
+	searchRects   []vt.MatchRect
+	lines         []rowCache
+	shaped        lru
+	contrast      map[contrastPair]ui.Color
 
 	keys    *vt.KeyEncoder
 	mouse   *vt.MouseEncoder
@@ -95,18 +118,16 @@ type view struct {
 	// selecting tells that the primary button selects; reporting that a
 	// press went to the program, which gets the release too.
 	selecting, reporting bool
-	pointer              [2]float32
-	// hoverLink: Command is held over a link, which a click opens;
-	// linkPress: the primary button pressed one, and the press is the
-	// link's until the release.
-	hoverLink, linkPress bool
-	// opening is the link a click asked to open, opened once t.mu is
-	// released; openingPath tells it is a file path, which the system
-	// does not open.
-	opening     string
-	openingPath bool
+	touchSelecting       bool
+	// A tracked primary click is deferred until release so that a drag
+	// can stay local instead of starting the program's own text selection.
+	mousePress  *ui.InputEvent
+	pointer     [2]float32
 	scrolled    float32 // scrolling not yet a whole row
 	ticking     bool    // an autoscroll tick is due
+	linkMods    ui.Modifiers
+	linkPressed bool
+	hover       linkMatch
 }
 
 type pendingKey struct {
@@ -114,9 +135,7 @@ type pendingKey struct {
 	unshifted rune
 	mods      ui.Modifiers
 	repeat    bool
-	// taken: Options.OnKey took the key, whose text and release are
-	// dropped.
-	taken bool
+	taken     bool
 }
 
 // build updates the view as a frame builds.
@@ -132,32 +151,53 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 		theme = defaultTheme(dark)
 	}
 	v.theme = theme
+	if adaptive := t.opts.AdaptiveColors; adaptive != v.adaptiveColors {
+		v.adaptiveColors = adaptive
+		clear(v.contrast)
+		v.lines = nil
+	}
+	opposite := t.opts.DarkTheme
+	if theme.dark() {
+		opposite = t.opts.Theme
+	}
+	if opposite == nil || opposite.dark() == theme.dark() {
+		opposite = defaultTheme(!theme.dark())
+	}
+	v.oppositeBackground = opposite.Background
 	if t.term == nil {
 		v.release()
 	} else {
 		if v.applied != theme {
+
 			theme.apply(t.term)
 			v.applied = theme
+			clear(v.contrast)
+			v.lines = nil
 		}
 		t.curTheme = theme
 		if focused != v.focused && t.term.Mode(vt.ModeFocusEvent) {
 			t.in.push(vt.EncodeFocus(focused))
 		}
-		// The hand over a link follows Command as it is pressed and let
-		// go of, with the pointer still.
-		link, _ := v.linkUnder(c.Modifiers(), v.pointer[0], v.pointer[1])
-		v.hoverLink = link != ""
 		// Input methods compose where the cursor is now, which the last
 		// frame may not show yet.
 		v.caretCell = [2]int{v.cursor.X, v.cursor.Y}
-		if t.term.AtBottom() {
-			x, y := t.term.Cursor()
+		if v.screen().AtBottom() {
+			x, y := v.screen().Cursor()
 			v.caretCell = [2]int{x, y}
 		}
 	}
 	copied := t.clipOut
 	t.clipOut = nil
+	var holdDue time.Time
+	if t.term != nil && t.held {
+		holdDue = t.heldSince.Add(syncOutputTimeout)
+	}
 	t.mu.Unlock()
+	if !holdDue.IsZero() {
+		// The watchdog must also wake a window with a hidden cursor and no
+		// further output; otherwise an incomplete update could stay frozen.
+		c.After(max(holdDue.Sub(c.Now()), time.Millisecond))
+	}
 	for _, s := range copied {
 		c.WriteClipboard(s)
 	}
@@ -167,10 +207,15 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 		if !focused {
 			// Input methods drop their composition with the focus.
 			v.preedit, v.pending = "", nil
+			v.linkMods, v.linkPressed = 0, false
+			if v.mousePress != nil {
+				v.mousePress = nil
+				v.selecting, v.ticking = false, false
+			}
 		}
 	}
 	// The cursor blinks, every 600 ms, while the terminal has the focus.
-	if v.focused && v.cursor.Blinking && v.cursor.Visible {
+	if (v.focused || t.opts.ActiveCursor) && v.cursor.Blinking && v.cursor.Visible {
 		since := c.Now().Sub(v.blinkStart)
 		c.After(blinkPeriod - since%blinkPeriod)
 	}
@@ -219,7 +264,7 @@ func (v *view) menu(m *ui.Menu) {
 	t.mu.Lock()
 	text, selected := "", false
 	if t.term != nil {
-		text, selected = t.term.SelectionText()
+		text, selected = v.selectionText()
 	}
 	t.mu.Unlock()
 	if m.Item("Copy").Shortcut(cmd, ui.KeyC).Disabled(!selected || text == "").Chosen() {
@@ -239,13 +284,31 @@ func (v *view) menu(m *ui.Menu) {
 
 // input handles the input of the view as it comes.
 func (v *view) input(ev ui.InputEvent) bool {
+	v.t.in.mu.Lock()
+	paused := v.t.in.paused
+	v.t.in.mu.Unlock()
+	if paused && (ev.Kind == ui.InputKeyDown || ev.Kind == ui.InputKeyUp || ev.Kind == ui.InputText || ev.Kind == ui.InputCompose || ev.Kind == ui.InputTextReplace || ev.Kind == ui.InputSelection || ev.Kind == ui.InputCommand && ev.Text == "paste") {
+		v.pending, v.preedit = nil, ""
+		return true
+	}
+
 	switch ev.Kind {
 	case ui.InputKeyDown:
 		return v.keyDown(ev)
 	case ui.InputKeyUp:
 		return v.keyUp(ev)
 	case ui.InputText:
-		v.typed(ev.Text)
+		if ev.Mods != 0 {
+			v.modifiedText(ev.Text, ev.Mods)
+		} else {
+			v.typed(ev.Text)
+		}
+		return true
+	case ui.InputTextReplace:
+		v.replaceInput(ev)
+		return true
+	case ui.InputSelection:
+		v.moveInputCaret(ev.Caret)
 		return true
 	case ui.InputCompose:
 		v.preedit, v.preeditCaret, v.pending = ev.Text, ev.Caret, nil
@@ -262,15 +325,8 @@ func (v *view) input(ev ui.InputEvent) bool {
 			return false
 		}
 		return true
-	case ui.InputPointerDown, ui.InputPointerUp, ui.InputPointerMove:
-		took := v.pointerEvent(ev)
-		if link := v.opening; link != "" {
-			v.opening = ""
-			if open := v.t.opts.OpenLink; (open == nil || !open(link)) && !v.openingPath {
-				v.services.OpenURL(link)
-			}
-		}
-		return took
+	case ui.InputPointerDown, ui.InputPointerUp, ui.InputPointerMove, ui.InputPointerCancel, ui.InputLongPress:
+		return v.pointerEvent(ev)
 	case ui.InputScroll:
 		return v.scroll(ev)
 	}
@@ -297,9 +353,12 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
 	case mods == copyMods && key == ui.KeyV:
 		v.paste()
 		return true
+	case runtime.GOOS == "ios" && mods == ui.Ctrl && key == ui.KeyV && t.opts.OnPaste != nil:
+		v.paste()
+		return true
 	case mods == ui.Shift && (key == ui.KeyPageUp || key == ui.KeyPageDown) && v.scrollPage(key == ui.KeyPageUp):
 		return true
-	case mods&ui.Super != 0:
+	case mods&ui.Super != 0 && !ev.Software:
 		return false // the app's shortcuts
 	}
 	k, unshifted := vtKey(key)
@@ -327,6 +386,7 @@ func (v *view) keyDown(ev ui.InputEvent) bool {
 	if ev.Repeat {
 		action = vt.KeyRepeat
 	}
+	t.contextKey(k, mods, text)
 	v.sendKey(vt.KeyEvent{Action: action, Key: k, Mods: vtMods(mods), Text: text, Unshifted: unshifted})
 	return true
 }
@@ -337,30 +397,31 @@ func (v *view) scrollPage(up bool) bool {
 	t := v.t
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.term == nil || t.term.AltScreen() {
+	if v.screen() == nil || v.screen().AltScreen() {
 		return false
 	}
-	_, rows := t.term.Size()
+	_, rows := v.screen().Size()
 	page := max(rows-1, 1)
 	if up {
 		page = -page
 	}
-	t.term.ScrollBy(page)
+	v.screen().ScrollBy(page)
 	return true
 }
 
 func (v *view) keyUp(ev ui.InputEvent) bool {
 	k, unshifted := vtKey(ev.Key)
-	if k == vt.KeyUnidentified || ev.Mods&ui.Super != 0 {
+	if k == vt.KeyUnidentified || ev.Mods&ui.Super != 0 && !ev.Software {
 		return false
 	}
 	if p := v.pending; p != nil && p.key == k {
-		v.pending = nil
 		if p.taken {
+			v.pending = nil
 			return true
 		}
 		// No text came, as for Control, Alt and a letter on Windows,
 		// where they may type one: the key alone.
+		v.pending = nil
 		action := vt.KeyPress
 		if p.repeat {
 			action = vt.KeyRepeat
@@ -374,17 +435,27 @@ func (v *view) keyUp(ev ui.InputEvent) bool {
 		}
 		v.sendKey(vt.KeyEvent{Action: action, Key: p.key, Mods: vtMods(p.mods), Text: text, Unshifted: p.unshifted})
 	}
-	return v.encodeKey(vt.KeyEvent{Action: vt.KeyRelease, Key: k, Mods: vtMods(ev.Mods), Unshifted: unshifted}, false)
+	handled := v.encodeKey(vt.KeyEvent{Action: vt.KeyRelease, Key: k, Mods: vtMods(ev.Mods), Unshifted: unshifted}, false)
+	if ev.Key == ui.KeyEnter && ev.Mods == 0 && v.t.opts.OnSubmit != nil {
+		v.t.opts.OnSubmit(v.services)
+		return true
+	}
+	return handled
 }
 
 // typed sends text typed or committed by an input method.
 func (v *view) typed(text string) {
+	if text == "" {
+		v.preedit = ""
+		return
+	}
 	v.preedit = ""
 	p := v.pending
 	v.pending = nil
 	if p != nil && p.taken {
-		return // the text of a key OnKey took
+		return
 	}
+	v.t.contextText(text)
 	if p == nil {
 		// Text without a key: of an input method, or every key typing
 		// text on Linux.
@@ -445,8 +516,8 @@ func (v *view) encodeKey(k vt.KeyEvent, press bool) bool {
 	}
 	t.in.push(append([]byte(nil), b...))
 	if press {
-		t.term.ScrollToBottom()
-		t.term.SetSelection(nil)
+		v.screen().ScrollToBottom()
+		v.screen().SetSelection(nil)
 	}
 	return true
 }
@@ -456,8 +527,8 @@ func (v *view) sendText(text string) {
 	t := v.t
 	t.mu.Lock()
 	if t.term != nil {
-		t.term.ScrollToBottom()
-		t.term.SetSelection(nil)
+		v.screen().ScrollToBottom()
+		v.screen().SetSelection(nil)
 	}
 	t.mu.Unlock()
 	t.Send([]byte(text))
@@ -469,7 +540,7 @@ func (v *view) copy() {
 	t.mu.Lock()
 	text, ok := "", false
 	if t.term != nil {
-		text, ok = t.term.SelectionText()
+		text, ok = v.selectionText()
 	}
 	t.mu.Unlock()
 	if ok && text != "" {
@@ -478,29 +549,25 @@ func (v *view) copy() {
 }
 
 func (v *view) paste() {
-	text := v.services.ReadClipboard()
-	if on := v.t.opts.OnPaste; on != nil && on(text) {
+	if v.t.opts.OnPaste != nil && v.t.opts.OnPaste(v.services.ReadClipboard()) {
 		return
 	}
-	if text != "" {
+	if text := v.services.ReadClipboard(); text != "" {
 		v.t.Paste(text)
 	}
 }
 
-func (v *view) selectAll() {
-	t := v.t
-	t.mu.Lock()
-	if t.term != nil {
-		if s, ok := t.term.SelectAll(); ok {
-			t.term.SetSelection(&s)
-		}
+// selectionText is shared by automatic, keyboard and context-menu copying.
+// The caller holds the terminal lock.
+func (v *view) selectionText() (string, bool) {
+	if v.t.opts.CopyRawText {
+		return v.screen().SelectionText()
 	}
-	t.mu.Unlock()
-	v.services.Invalidate()
+	return v.screen().VisibleSelectionText()
 }
 
-// cellAt returns the cell under a point of the element, in DIPs, within
-// the grid.
+func (v *view) selectAll() { v.t.SelectAll() }
+
 func (v *view) cellAt(x, y float32) (col, row int) {
 	if v.cellW == 0 {
 		return 0, 0
@@ -514,31 +581,75 @@ func (v *view) cellAt(x, y float32) (col, row int) {
 // selects.
 func (v *view) pointerEvent(ev ui.InputEvent) bool {
 	t := v.t
-	v.pointer = [2]float32{ev.X, ev.Y}
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.term == nil || v.cellW == 0 {
+	v.pointer = [2]float32{ev.X, ev.Y}
+	var copied string
+	var opened linkMatch
+	defer func() {
+		t.selectionDragging = v.selecting
+		if v.cellW > 0 && v.scale > 0 {
+			t.selectionAnchor = ui.Rect{X: v.pointer[0], Y: v.pointer[1], W: 1, H: float32(v.cellH) / v.scale}
+		}
+
+		t.mu.Unlock()
+		if opened.URL != "" || opened.Path != "" {
+			if t.opts.OnOpenLink != nil {
+				t.opts.OnOpenLink(opened.Link)
+			} else {
+				link := opened.URL
+				if link == "" {
+					link = opened.raw
+				}
+				if open := t.opts.OpenLink; (open == nil || !open(link)) && opened.URL != "" {
+					v.services.OpenURL(opened.URL)
+				}
+			}
+		}
+		if copied != "" {
+			v.services.WriteClipboard(copied)
+		}
+	}()
+	if v.screen() == nil || v.cellW == 0 {
 		return false
 	}
-	if v.linkPress {
-		// The press opened a link: its moves and its release are no one
-		// else's.
-		v.linkPress = ev.Kind != ui.InputPointerUp
+	if ev.Kind == ui.InputPointerCancel {
+		if v.reporting {
+			ev.Kind = ui.InputPointerUp
+			v.report(ev)
+		}
+		v.selecting, v.ticking, v.linkPressed = false, false, false
+		v.touchSelecting = false
+		v.mousePress = nil
+		if v.gesture != nil {
+			v.gesture.Reset(v.screen())
+		}
 		return true
 	}
-	// Command over a link: a hand, and a click opens it, before a
-	// program that takes the mouse sees it.
-	link, path := v.linkUnder(ev.Mods, ev.X, ev.Y)
-	if hover := link != ""; hover != v.hoverLink {
-		v.hoverLink = hover
-		v.services.Invalidate()
-	}
-	if link != "" && ev.Kind == ui.InputPointerDown && ev.Button == 0 {
-		v.opening, v.openingPath, v.linkPress = link, path, true
+	if v.linkPressed {
+		if ev.Kind == ui.InputPointerUp && ev.Button == 0 {
+			v.linkPressed = false
+		}
 		return true
 	}
-	tracking := t.term.MouseTracking() && ev.Mods&ui.Shift == 0
-	if tracking && !v.selecting || v.reporting {
+	if t.opts.SelectOnDrag && ev.Mods&ui.Alt == 0 && ev.Button == 1 && (ev.Kind == ui.InputPointerDown || ev.Kind == ui.InputPointerUp) {
+		return false // Keep the terminal context menu available for local selection.
+	}
+	if ev.Kind == ui.InputPointerDown && ev.Button == 0 && ev.Mods&ui.Cmd != 0 {
+		if link := v.linkAt(ev.X, ev.Y); link.valid() {
+			opened, v.linkPressed = link, true
+			return true
+		}
+	}
+	longPress := ev.Kind == ui.InputLongPress
+	if longPress {
+		v.touchSelecting = true
+	}
+	tracking := !v.touchSelecting && v.screen().MouseTracking() && ev.Mods&ui.Shift == 0
+	// Alternate-screen programs own history outside the terminal grid. Honor
+	// their mouse protocol so selection can scroll that application history.
+	localDrag := t.opts.SelectOnDrag && !v.screen().AltScreen()
+	preferDrag := localDrag && ev.Mods&ui.Alt == 0 && ev.Kind == ui.InputPointerDown && ev.Button == 0
+	if tracking && !v.selecting && !preferDrag || v.reporting {
 		return v.report(ev)
 	}
 	if v.gesture == nil {
@@ -551,79 +662,84 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 	col, row := v.cellAt(ev.X, ev.Y)
 	px, py := float64(ev.X*v.scale), float64(ev.Y*v.scale)
 	switch ev.Kind {
-	case ui.InputPointerDown:
+	case ui.InputPointerDown, ui.InputLongPress:
 		if ev.Button != 0 {
 			return false // the context menu
 		}
-		ref, ok := t.term.CellAt(col, row)
+		ref, ok := v.screen().CellAt(col, row)
 		if !ok {
 			return false
 		}
 		v.selecting = true
-		if s, ok := v.gesture.Press(t.term, ref, px, py, uint64(time.Now().UnixNano())); ok {
-			t.term.SetSelection(&s)
+		v.mousePress = nil
+		if tracking && preferDrag {
+			press := ev
+			v.mousePress = &press
+		}
+		press := v.gesture.Press
+		if longPress {
+			press = v.gesture.Word
+		}
+		if s, ok := press(v.screen(), ref, px, py, uint64(time.Now().UnixNano())); ok {
+			v.screen().SetSelection(&s)
+			v.mousePress = nil // Double/triple clicks select words/lines.
 		} else {
-			t.term.SetSelection(nil)
+			v.screen().SetSelection(nil)
 		}
 		return true
 	case ui.InputPointerMove:
 		if !v.selecting {
 			return false
 		}
-		ref, ok := t.term.CellAt(col, row)
+		ref, ok := v.screen().CellAt(col, row)
 		if !ok {
 			return true
 		}
-		if s, ok := v.gesture.Drag(t.term, ref, px, py, v.geometry(), ev.Mods&ui.Alt != 0); ok {
-			t.term.SetSelection(&s)
+		px, py = v.selectionPosition(ev.X, ev.Y)
+		if s, ok := v.gesture.Drag(v.screen(), ref, px, py, v.geometry(), ev.Mods&ui.Alt != 0); ok {
+			v.screen().SetSelection(&s)
 		}
-		v.ticking = v.gesture.Autoscroll(t.term) != 0
+		if v.gesture.Dragged(v.screen()) {
+			v.mousePress = nil
+		}
+		v.ticking = v.gesture.Autoscroll(v.screen()) != 0
 		return true
 	case ui.InputPointerUp:
 		if !v.selecting || ev.Button != 0 {
 			return false
 		}
 		v.selecting, v.ticking = false, false
-		ref, ok := t.term.CellAt(col, row)
+		v.touchSelecting = false
+		ref, ok := v.screen().CellAt(col, row)
 		if ok {
-			v.gesture.Release(t.term, &ref)
+			// A quick drag can reach its final cell in the release event
+			// before a motion event was delivered. Don't turn it into a
+			// program click or lose the final selected column.
+			if v.mousePress != nil {
+				if s, ok := v.gesture.Drag(v.screen(), ref, px, py, v.geometry(), false); ok {
+					v.screen().SetSelection(&s)
+				}
+				if v.gesture.Dragged(v.screen()) {
+					v.mousePress = nil
+				}
+			}
+			v.gesture.Release(v.screen(), &ref)
 		} else {
-			v.gesture.Release(t.term, nil)
+			v.gesture.Release(v.screen(), nil)
+		}
+		if press := v.mousePress; press != nil {
+			v.mousePress = nil
+			v.report(*press)
+			return v.report(ev)
+		}
+		// Copy only a completed, nonempty mouse selection. A plain click
+		// or an empty selection leaves the user's clipboard intact.
+		if t.opts.CopyOnSelect {
+			copied, _ = v.selectionText()
 		}
 		return true
 	}
 	return false
-}
-
-// linkUnder is the link a click with mods at (x, y) opens, and whether it
-// is a file path: none without Command, or while the primary button
-// selects or the program has a press; t.mu is held.
-func (v *view) linkUnder(mods ui.Modifiers, x, y float32) (link string, path bool) {
-	if mods&ui.Cmd == 0 || v.selecting || v.reporting || v.cellW == 0 {
-		return "", false
-	}
-	return v.linkAt(v.cellAt(x, y))
-}
-
-// linkAt is the link at the cell: a hyperlink (OSC 8), a URL printed as
-// text, or with Options.OpenLink a file path, or ""; t.mu is held.
-func (v *view) linkAt(col, row int) (link string, path bool) {
-	t := v.t
-	if ref, ok := t.term.CellAt(col, row); ok {
-		if url := t.term.Hyperlink(ref); url != "" {
-			return url, false
-		}
-	}
-	text, cols := t.term.RowText(row)
-	if url := urlAt(text, cols, col); url != "" {
-		return url, false
-	}
-	if t.opts.OpenLink != nil {
-		if p := pathAt(text, cols, col); p != "" {
-			return p, true
-		}
-	}
-	return "", false
 }
 
 // geometry is the grid in pixels, for selection gestures.
@@ -631,19 +747,35 @@ func (v *view) geometry() vt.Geometry {
 	return vt.Geometry{Columns: v.cols, CellWidth: v.cellW, PadLeft: v.ox, Height: v.oy + v.rows*v.cellH}
 }
 
+// Reaching a visible viewport edge should scroll a drag even when the window
+// prevents the pointer from leaving the grid. Only the gesture position is
+// projected outside; hit testing and the selection anchor use the real point.
+func (v *view) selectionPosition(x, y float32) (float64, float64) {
+	px, py := float64(x*v.scale), float64(y*v.scale)
+	top := max(v.oy, 0)
+	bottom := min(v.oy+v.rows*v.cellH, int(math.Round(padY*float64(v.scale)))+v.viewportH)
+	edge := min(int(math.Ceil(8*float64(v.scale))), max((bottom-top)/3, 1))
+	if py < float64(top+edge) {
+		py = -1
+	} else if py > float64(bottom-edge) {
+		py = float64(v.geometry().Height + 1)
+	}
+	return px, py
+}
+
 // autoscroll scrolls a selection dragged past the top or the bottom; t.mu
 // is held.
 func (v *view) autoscroll() {
-	t := v.t
-	dir := v.gesture.Autoscroll(t.term)
+	dir := v.gesture.Autoscroll(v.screen())
 	if dir == 0 || !v.selecting {
 		v.ticking = false
 		return
 	}
-	t.term.ScrollBy(dir)
+	v.screen().ScrollBy(dir)
 	col, row := v.cellAt(v.pointer[0], v.pointer[1])
-	if s, ok := v.gesture.Tick(t.term, col, row, float64(v.pointer[0]*v.scale), float64(v.pointer[1]*v.scale), v.geometry(), false); ok {
-		t.term.SetSelection(&s)
+	px, py := v.selectionPosition(v.pointer[0], v.pointer[1])
+	if s, ok := v.gesture.Tick(v.screen(), col, row, px, py, v.geometry(), false); ok {
+		v.screen().SetSelection(&s)
 	}
 }
 
@@ -688,6 +820,16 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 	if v.cellH == 0 {
 		return false
 	}
+	if v.fixedGrid {
+		oldX, oldY := v.panX, v.panY
+		v.panX = min(max(v.panX+int(math.Round(float64(ev.DX*v.scale))), 0), max(v.cols*v.cellW-v.viewportW, 0))
+		v.panY = min(max(v.panY+int(math.Round(float64(ev.DY*v.scale))), 0), max(v.rows*v.cellH-v.viewportH, 0))
+		if oldX != v.panX || oldY != v.panY {
+			v.ox += oldX - v.panX
+			v.oy += oldY - v.panY
+			return true
+		}
+	}
 	ch := float32(v.cellH) / v.scale
 	dy := ev.DY
 	if !ev.Precise {
@@ -713,13 +855,14 @@ func (v *view) scroll(ev ui.InputEvent) bool {
 			}
 			v.mouse = m
 		}
+		mx, my := ev.X*v.scale, ev.Y*v.scale
 		v.mouse.Sync(t.term, v.ox*2+v.cols*v.cellW, v.oy*2+v.rows*v.cellH, v.cellW, v.cellH, v.ox, v.oy, false)
 		button := vt.WheelDown
 		if rows < 0 {
 			button = vt.WheelUp
 		}
 		for range abs(rows) {
-			if out := v.mouse.Encode(vt.MousePress, button, vtMods(ev.Mods), ev.X*v.scale, ev.Y*v.scale); len(out) > 0 {
+			if out := v.mouse.Encode(vt.MousePress, button, vtMods(ev.Mods), mx, my); len(out) > 0 {
 				t.in.push(append([]byte(nil), out...))
 			}
 		}
@@ -764,3 +907,5 @@ func shiftedText(k ui.Key, unshifted rune) string {
 	}
 	return string(unshifted)
 }
+
+func (v *view) screen() *vt.Terminal { return v.t.term }

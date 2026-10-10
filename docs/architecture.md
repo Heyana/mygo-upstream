@@ -931,7 +931,9 @@ build` like mygo-runtime and released with the same version.
     first phase); a second lock guards the render state, which a program's
     synchronized update (mode 2026) holds: the render hold callback copies
     the screen as the update starts, and frames show that copy until it
-    ends, or for a second at most. Locks are taken in that order.
+    ends; a watchdog releases it after a second without output, even with
+    a hidden cursor. Optional timing callbacks run after both locks are
+    released. Locks are taken in that order.
   - *Drawing.* The view sizes the grid in device pixels from the font
     (cells as wide as the widest ASCII glyph, as tall as the line) and
     rebuilds only the rows the render state marks dirty: runs of cells of

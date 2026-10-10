@@ -24,3 +24,8 @@ the commit of Ghostty in `internal/libbuild`, into `build/`, and writes
 this package: publish them as the assets of the release that file points
 at. It writes `ghostty_themes.go` too, the themes that Ghostty ships, which
 `go run ./internal/libbuild -themes` writes alone, without Zig.
+
+The plugin exposes incremental search with highlights, selection text and
+anchors, software key encoding, fixed-grid connections, and optional color
+contrast adjustment. Copy-on-selection and mouse-tracking drag overrides
+are opt-in; session management and application menus belong to the app.

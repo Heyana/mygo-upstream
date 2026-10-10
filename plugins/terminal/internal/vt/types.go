@@ -209,31 +209,35 @@ type RowID struct{ bits [2]uint64 }
 
 func layouts() map[string]layout {
 	var (
-		sc  styleColor
-		s   style
-		c   renderCursor
-		rc  renderColors
-		rs  rowSelection
-		cv  cellsView
-		sb  Scrollbar
-		sv  scrollViewport
-		mc  modeConfig
-		gr  GridRef
-		pt  point
-		sel Selection
-		sfo selectionFormatOptions
-		mes mouseEncoderSize
-		cw  clipboardWrite
-		cc  clipboardContent
-		cwr clipboardWriteReply
-		dn  desktopNotification
-		pr  progressReport
-		da  deviceAttributes
-		fo  formatterOptions
+		sc   styleColor
+		s    style
+		c    renderCursor
+		rc   renderColors
+		rs   rowSelection
+		cv   cellsView
+		sb   Scrollbar
+		sv   scrollViewport
+		mc   modeConfig
+		gr   GridRef
+		pt   point
+		pc   pointCoordinate
+		sbuf selectionBuffer
+		sel  Selection
+		sfo  selectionFormatOptions
+		mes  mouseEncoderSize
+		cw   clipboardWrite
+		cc   clipboardContent
+		cwr  clipboardWriteReply
+		dn   desktopNotification
+		pr   progressReport
+		da   deviceAttributes
+		fo   formatterOptions
 	)
 	return map[string]layout{
-		"GhosttyColorRgb":   {unsafe.Sizeof(RGB{}), map[string]uintptr{"r": 0, "g": 1, "b": 2}},
-		"GhosttyStyleColor": {unsafe.Sizeof(sc), map[string]uintptr{"tag": 0, "value": unsafe.Offsetof(sc.value)}},
+		"GhosttyPointCoordinate": {unsafe.Sizeof(pc), map[string]uintptr{"x": 0, "y": unsafe.Offsetof(pc.y)}},
+		"GhosttySelectionBuffer": {unsafe.Sizeof(sbuf), map[string]uintptr{"ptr": 0, "cap": unsafe.Offsetof(sbuf.cap), "len": unsafe.Offsetof(sbuf.len)}},
+		"GhosttyColorRgb":        {unsafe.Sizeof(RGB{}), map[string]uintptr{"r": 0, "g": 1, "b": 2}},
+		"GhosttyStyleColor":      {unsafe.Sizeof(sc), map[string]uintptr{"tag": 0, "value": unsafe.Offsetof(sc.value)}},
 		"GhosttyStyle": {unsafe.Sizeof(s), map[string]uintptr{
 			"fg_color": unsafe.Offsetof(s.fg), "bg_color": unsafe.Offsetof(s.bg), "underline_color": unsafe.Offsetof(s.underlineColor),
 			"bold": unsafe.Offsetof(s.bold), "italic": unsafe.Offsetof(s.italic), "faint": unsafe.Offsetof(s.faint),
@@ -257,7 +261,6 @@ func layouts() map[string]layout {
 		"GhosttyTerminalModeConfig":      {unsafe.Sizeof(mc), map[string]uintptr{"mode": 0, "value": unsafe.Offsetof(mc.value)}},
 		"GhosttyGridRef":                 {unsafe.Sizeof(gr), map[string]uintptr{"node": unsafe.Offsetof(gr.node), "x": unsafe.Offsetof(gr.x), "y": unsafe.Offsetof(gr.y)}},
 		"GhosttyPoint":                   {unsafe.Sizeof(pt), map[string]uintptr{"tag": 0, "value": unsafe.Offsetof(pt.x)}},
-		"GhosttyPointCoordinate":         {8, map[string]uintptr{"x": unsafe.Offsetof(pt.x) - unsafe.Offsetof(pt.x), "y": unsafe.Offsetof(pt.y) - unsafe.Offsetof(pt.x)}},
 		"GhosttySelection":               {unsafe.Sizeof(sel), map[string]uintptr{"start": unsafe.Offsetof(sel.start), "end": unsafe.Offsetof(sel.end), "rectangle": unsafe.Offsetof(sel.rectangle)}},
 		"GhosttyTerminalSelectionFormatOptions": {unsafe.Sizeof(sfo), map[string]uintptr{
 			"emit": unsafe.Offsetof(sfo.emit), "unwrap": unsafe.Offsetof(sfo.unwrap), "trim": unsafe.Offsetof(sfo.trim), "selection": unsafe.Offsetof(sfo.selection),

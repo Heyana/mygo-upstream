@@ -14,7 +14,7 @@
 // sequences or the Kitty keyboard protocol, mouse reporting, bracketed
 // paste, focus reports, synchronized output, hyperlinks (OSC 8), titles,
 // the working directory (OSC 7) and the clipboard (OSC 52). Selecting with
-// the pointer copies as Ghostty does: a drag selects cells, a double click
+// the pointer selects text: a drag selects cells, a double click
 // words and a triple click lines; Option (macOS) or Alt drags a rectangle.
 //
 // libghostty-vt is a native library loaded at run time, with no cgo: `mygo
@@ -36,9 +36,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
 	"github.com/egoist/mygo/plugins/terminal/internal/pty"
 	"github.com/egoist/mygo/plugins/terminal/internal/vt"
-	"github.com/egoist/mygo/ui"
 )
 
 // Options configure a terminal.
@@ -59,7 +60,18 @@ type Options struct {
 	// as a remote shell: what the terminal reads from it shows, and what
 	// is typed is written to it. Command, Dir and Env are then ignored. A
 	// Conn with a method Resize(cols, rows int) error is told the size.
+	// Optional ReadScreen([]byte) (n, cols, rows int, err error) supplies
+	// dimensions before incremental output. ReadScreenUpdate([]byte)
+	// (n, cols, rows int, snapshot []byte, err error) takes precedence;
+	// a nonempty snapshot replaces the screen instead of consuming n bytes.
+	// Dimensions update a configured fixed grid; the connection owns framing.
 	Conn io.ReadWriteCloser
+
+	// FixedCols and FixedRows decode a screen at its source
+	// size, independently of the view. Both must be positive. FitToView
+	// scales that grid to fit the view without reflowing ANSI output.
+	FixedCols, FixedRows int
+	FitToView            bool
 
 	// Font is the font of the text: the system's monospaced font at 13
 	// DIPs when zero.
@@ -73,12 +85,33 @@ type Options struct {
 	// NoBlink keeps it from blinking unless a program asks it to.
 	Cursor  CursorStyle
 	NoBlink bool
+	// ActiveCursor keeps the cursor active when the software keyboard is
+	// hidden, so a mobile terminal still blinks without taking input focus.
+	ActiveCursor bool
+	// InputContext exposes locally typed, unsubmitted text to native caret
+	// navigation. It never buffers input or changes the terminal rendering.
+	InputContext bool
 	// Scrollback is about how many bytes of output the terminal keeps above
 	// the screen: 10 MB when zero, none when negative.
 	Scrollback int
 	// OptionAsAlt makes Option on macOS the Alt key of programs (Meta),
 	// rather than the key that types accented letters and symbols.
 	OptionAsAlt bool
+	// CopyRawText retains concealed characters when copying a selection.
+	// The default copies visible text; neither mode interprets Markdown.
+	CopyRawText bool
+	// CopyOnSelect copies completed nonempty pointer selections to the clipboard.
+	// The default leaves copying to shortcuts or the context menu.
+	CopyOnSelect bool
+	// SelectOnDrag lets the terminal select text when a primary-screen program
+	// tracks the mouse. Alternate-screen programs retain their mouse protocol
+	// and application-owned history. Plain clicks and the wheel still reach
+	// the program; Alt bypasses this override, and Shift forces local selection.
+	SelectOnDrag bool
+	// AdaptiveColors keeps neutral RGB/extended-palette panels and text
+	// readable when a program caches its startup palette across theme changes.
+	// Normal ANSI background colors and colored panels retain their colors.
+	AdaptiveColors bool
 	// Transparent leaves the terminal's background undrawn, so that what
 	// is under the view shows through, as the window's material or an
 	// element's translucent background, as Ghostty's background-opacity
@@ -96,7 +129,13 @@ type Options struct {
 	OnExit   func(code int)
 	OnBell   func()
 	OnNotify func(title, body string)
-
+	// OnRenderEvent reports slow synchronized updates and watchdog releases,
+	// without terminal contents. It runs on the reader or UI thread after
+	// releasing emulator locks; calls back into the terminal are safe.
+	OnRenderEvent func(RenderEvent)
+	// OnOpenLink runs on the UI thread, without holding the emulator lock.
+	// It receives a Command-clicked URL or printed file path and location.
+	OnOpenLink func(Link)
 	// OpenLink takes what a Command+click (Control+click elsewhere)
 	// opens: a hyperlink (OSC 8), a URL printed as text, or, only with
 	// OpenLink set, a file path printed as text (absolute, ~/, ./ or ../,
@@ -122,6 +161,9 @@ type Options struct {
 	// what it sends with Send. A key that only types text may come as its
 	// text alone, as on Linux, which OnKey does not see.
 	OnKey func(mods ui.Modifiers, key ui.Key) bool
+	// OnSubmit runs on the UI thread after an unmodified Return key is
+	// released. Its terminal key events have already been queued.
+	OnSubmit func(ui.Services)
 }
 
 // CursorStyle is the shape of the cursor.
@@ -136,16 +178,22 @@ const (
 // Terminal is a terminal emulator and the program it runs. Its methods are
 // safe from any goroutine.
 type Terminal struct {
-	opts Options
-	in   inputQueue
+	opts    Options
+	in      inputQueue
+	context inputContext
 
 	// mu guards the emulator, which the reader changes and frames read.
-	mu      sync.Mutex
-	term    *vt.Terminal
-	size    gridSize
-	events  events
-	closed  bool
-	clipOut []string // what programs copied, for the view to write
+	mu   sync.Mutex
+	term *vt.Terminal
+
+	search            *vt.Search
+	searchMoves       int
+	size              gridSize
+	events            events
+	closed            bool
+	clipOut           []string // what programs copied, for the view to write
+	selectionAnchor   ui.Rect
+	selectionDragging bool
 	// src is the program's pseudo-terminal, or Conn: nil until the
 	// program starts, from launch, its options.
 	src    io.ReadWriteCloser
@@ -162,10 +210,11 @@ type Terminal struct {
 
 	// rmu guards what frames draw from: the render state, which a
 	// program's synchronized update (mode 2026) holds.
-	rmu       sync.Mutex
-	rs        *vt.RenderState
-	held      bool
-	heldSince time.Time
+	rmu         sync.Mutex
+	rs          *vt.RenderState
+	held        bool
+	heldSince   time.Time // most recent input during a synchronized update
+	holdStarted time.Time
 
 	draw     atomic.Pointer[func()] // asks for a frame of the view
 	done     chan struct{}
@@ -181,12 +230,22 @@ type Terminal struct {
 // gridSize is the size of the screen in cells and of a cell in pixels.
 type gridSize struct{ cols, rows, cellW, cellH int }
 
+// RenderEvent describes a rendering delay without recording program output.
+type RenderEvent struct {
+	Kind     string // "slow_sync" or "sync_timeout"
+	Duration time.Duration
+}
+
+const syncOutputTimeout = time.Second
+const slowSyncThreshold = 250 * time.Millisecond
+
 // events are what a program did while the reader wrote its output, for
 // the callbacks, which run once the lock is released.
 type events struct {
 	title  bool
 	bells  int
 	notify [][2]string
+	render []RenderEvent
 }
 
 // New makes a terminal running opts.Command, or connected to opts.Conn.
@@ -199,8 +258,11 @@ func New(opts Options) (*Terminal, error) {
 	opts.Font.Features = append([]string(nil), opts.Font.Features...)
 	t := &Terminal{opts: opts, done: make(chan struct{})}
 	t.size = gridSize{80, 24, 8, 16}
+	if opts.FixedCols > 0 && opts.FixedRows > 0 {
+		t.size.cols, t.size.rows = opts.FixedCols, opts.FixedRows
+	}
 	var err error
-	t.term, err = vt.NewTerminal(80, 24, vt.Effects{
+	t.term, err = vt.NewTerminal(t.size.cols, t.size.rows, vt.Effects{
 		WritePTY:     func(p []byte) { t.in.push(append([]byte(nil), p...)) },
 		Bell:         func() { t.events.bells++ },
 		TitleChanged: func() { t.events.title = true },
@@ -381,7 +443,37 @@ func environment(extra []string) []string {
 func (t *Terminal) read() {
 	buf := make([]byte, 64<<10)
 	for {
-		n, err := t.src.Read(buf)
+		var n, cols, rows int
+		var err error
+		var snapshot []byte
+		if src, ok := t.src.(interface {
+			ReadScreenUpdate([]byte) (int, int, int, []byte, error)
+		}); ok {
+			n, cols, rows, snapshot, err = src.ReadScreenUpdate(buf)
+		} else if src, ok := t.src.(interface {
+			ReadScreen([]byte) (int, int, int, error)
+		}); ok {
+			n, cols, rows, err = src.ReadScreen(buf)
+		} else {
+			n, err = t.src.Read(buf)
+		}
+		if len(snapshot) > 0 {
+			t.restoreSnapshot(snapshot, cols, rows)
+			if err != nil {
+				break
+			}
+			continue
+		}
+		if cols > 0 && rows > 0 {
+			t.mu.Lock()
+			if t.opts.FixedCols > 0 && t.opts.FixedRows > 0 {
+				t.opts.FixedCols, t.opts.FixedRows = cols, rows
+				size := t.size
+				size.cols, size.rows = cols, rows
+				t.resize(size)
+			}
+			t.mu.Unlock()
+		}
 		if n > 0 {
 			t.write(buf[:n])
 		}
@@ -399,6 +491,12 @@ func (t *Terminal) write(p []byte) {
 	var title string
 	if t.term != nil {
 		t.term.Write(p)
+
+		if t.held && len(p) != 0 {
+			// A slow but active redraw is not a stalled program. Only release
+			// an unfinished update after incoming data has stopped.
+			t.heldSince = time.Now()
+		}
 		ev, t.events = t.events, events{}
 		if ev.title {
 			title = t.term.Title()
@@ -411,6 +509,11 @@ func (t *Terminal) write(p []byte) {
 
 func (t *Terminal) fire(ev events, title string) {
 	o := &t.opts
+	for _, event := range ev.render {
+		if o.OnRenderEvent != nil {
+			o.OnRenderEvent(event)
+		}
+	}
 	if ev.title && o.OnTitle != nil {
 		o.OnTitle(title)
 	}
@@ -529,6 +632,72 @@ func (t *Terminal) Text() string {
 	return t.term.Text()
 }
 
+// SelectedText returns the selection in the grid currently shown to the user.
+func (t *Terminal) SelectedText() (string, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	screen := t.term
+	if screen == nil {
+		return "", false
+	}
+	if t.opts.CopyRawText {
+		return screen.SelectionText()
+	}
+	return screen.VisibleSelectionText()
+}
+
+// SelectionAnchor locates the last selection gesture in view DIPs. It is
+// unavailable while the finger is dragging, so contextual actions do not
+// obstruct selection. The caller places it relative to the view's bounds.
+func (t *Terminal) SelectionAnchor() (ui.Rect, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.term == nil || t.selectionDragging {
+		return ui.Rect{}, false
+	}
+	if _, selected := t.term.SelectionText(); !selected {
+		return ui.Rect{}, false
+	}
+	return t.selectionAnchor, t.selectionAnchor.H > 0
+}
+
+// SelectAll selects the screen and its available scrollback.
+func (t *Terminal) SelectAll() {
+	t.mu.Lock()
+	if t.term != nil {
+		if selection, ok := t.term.SelectAll(); ok {
+			t.term.SetSelection(&selection)
+		}
+	}
+	t.mu.Unlock()
+	t.redraw()
+}
+
+// SetCopyRawText changes selection copying without restarting the session.
+func (t *Terminal) SetCopyRawText(raw bool) {
+	t.mu.Lock()
+	t.opts.CopyRawText = raw
+	t.mu.Unlock()
+}
+
+func (t *Terminal) SetSelectOnDrag(selectOnDrag bool) {
+	t.mu.Lock()
+	t.opts.SelectOnDrag = selectOnDrag
+	t.mu.Unlock()
+}
+
+// SetAdaptiveColors changes rendering without altering the terminal's cells
+// or restarting the program that owns them.
+func (t *Terminal) SetAdaptiveColors(adaptive bool) {
+	t.mu.Lock()
+	changed := t.opts.AdaptiveColors != adaptive
+	t.opts.AdaptiveColors = adaptive
+	t.mu.Unlock()
+	if changed {
+		t.redraw()
+	}
+}
+
 // Resize sets the size of the screen in cells, for a terminal no view
 // shows, as one a server keeps for a session while no window does: a view
 // sets the size of the terminal it shows.
@@ -558,6 +727,22 @@ func (t *Terminal) Send(data []byte) {
 	}
 }
 
+// SetInputEnabled keeps reading and selection available during recovery while
+// discarding queued keystrokes. Commands typed offline are never replayed.
+func (t *Terminal) SetInputEnabled(enabled bool) {
+	t.in.mu.Lock()
+	if !enabled {
+		t.clearInputContext()
+	}
+	if t.in.paused != !enabled {
+		t.in.paused = !enabled
+		if !enabled {
+			t.in.queue = nil
+		}
+	}
+	t.in.mu.Unlock()
+}
+
 // Paste pastes text, bracketed when the program asks (mode 2004), so that
 // it does not run as commands as it would typed.
 func (t *Terminal) Paste(text string) {
@@ -569,7 +754,32 @@ func (t *Terminal) Paste(text string) {
 	data := vt.EncodePaste(text, t.term.Mode(vt.ModeBracketedPaste))
 	t.term.ScrollToBottom()
 	t.mu.Unlock()
+	t.contextText(text)
 	t.Send(data)
+	t.redraw()
+}
+
+// SetFixedSize decodes the source at cols×rows, independently of the view,
+// following the geometry of later screen frames, as FixedCols and
+// FixedRows do; zero sizes the screen to the view again. A window showing
+// a session whose size another device holds uses it.
+func (t *Terminal) SetFixedSize(cols, rows int) {
+	t.mu.Lock()
+	if cols > 0 && rows > 0 {
+		t.opts.FixedCols, t.opts.FixedRows = cols, rows
+	} else {
+		t.opts.FixedCols, t.opts.FixedRows = 0, 0
+	}
+	t.mu.Unlock()
+	t.redraw()
+}
+
+// SetFitToView switches a fixed remote grid between fitting the view and
+// its configured font size. Neither mode changes the remote program's size.
+func (t *Terminal) SetFitToView(fit bool) {
+	t.mu.Lock()
+	t.opts.FitToView = fit
+	t.mu.Unlock()
 	t.redraw()
 }
 
@@ -616,6 +826,10 @@ func (t *Terminal) Close() error {
 	// free it under the locks.
 	t.mu.Lock()
 	t.rmu.Lock()
+	if t.search != nil {
+		t.search.Free()
+		t.search = nil
+	}
 	t.term.Free()
 	t.term = nil
 	t.rs.Free()
@@ -686,9 +900,18 @@ func (t *Terminal) resize(s gridSize) {
 // frames show the screen as it was when it started; t.mu is held.
 func (t *Terminal) renderHold(held bool) {
 	t.rmu.Lock()
-	if held && t.rs != nil {
-		t.rs.Update(t.term)
+	if held {
+		if !t.held {
+			if t.rs != nil {
+				t.rs.Update(t.term)
+			}
+			t.holdStarted = time.Now()
+		}
 		t.heldSince = time.Now()
+	} else if t.held {
+		if elapsed := time.Since(t.holdStarted); elapsed >= slowSyncThreshold {
+			t.events.render = append(t.events.render, RenderEvent{Kind: "slow_sync", Duration: elapsed})
+		}
 	}
 	t.held = held
 	t.rmu.Unlock()
@@ -751,6 +974,7 @@ type inputQueue struct {
 	cond   *sync.Cond
 	queue  [][]byte
 	closed bool
+	paused bool
 }
 
 func (q *inputQueue) init() {
@@ -762,7 +986,7 @@ func (q *inputQueue) init() {
 func (q *inputQueue) push(p []byte) {
 	q.mu.Lock()
 	q.init()
-	if !q.closed {
+	if !q.closed && !q.paused {
 		q.queue = append(q.queue, p)
 		q.cond.Signal()
 	}

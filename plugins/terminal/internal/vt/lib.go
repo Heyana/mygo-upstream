@@ -307,6 +307,7 @@ var enums = []struct {
 	{"GhosttyTerminalScrollViewportTag", "ROW", 3},
 	{"GhosttyPointTag", "VIEWPORT", 1},
 	{"GhosttyClipboardWriteResult", "UNSUPPORTED", 2},
+	{"GhosttyTerminalData", "SELECTION", dataSelection},
 	{"GhosttySelectionGestureEventType", "DRAG", gestureDrag},
 }
 
