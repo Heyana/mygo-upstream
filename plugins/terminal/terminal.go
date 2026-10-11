@@ -108,6 +108,11 @@ type Options struct {
 	// and application-owned history. Plain clicks and the wheel still reach
 	// the program; Alt bypasses this override, and Shift forces local selection.
 	SelectOnDrag bool
+	// OpenLinksOnTap opens links on an unmodified primary tap, without
+	// requiring Command/Control. It is useful for touch terminals. Opening
+	// waits for release; moving, cancellation and long-press selection do
+	// not open a link. The default retains desktop modifier-click behavior.
+	OpenLinksOnTap bool
 	// AdaptiveColors keeps neutral RGB/extended-palette panels and text
 	// readable when a program caches its startup palette across theme changes.
 	// Normal ANSI background colors and colored panels retain their colors.

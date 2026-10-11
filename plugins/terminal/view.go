@@ -28,7 +28,7 @@ func View(c *ui.Context, t *Terminal) ui.Element {
 	v.build(c, e)
 	x, y, over := e.PointerPosition()
 	v.hover = linkMatch{}
-	if over && c.Modifiers()&ui.Cmd != 0 && v.cellW != 0 {
+	if over && (c.Modifiers()&ui.Cmd != 0 || t.opts.OpenLinksOnTap) && v.cellW != 0 {
 		t.mu.Lock()
 		v.hover = v.linkAt(x, y)
 		t.mu.Unlock()
@@ -127,7 +127,18 @@ type view struct {
 	ticking     bool    // an autoscroll tick is due
 	linkMods    ui.Modifiers
 	linkPressed bool
+	linkTap     *linkTap
 	hover       linkMatch
+}
+
+type linkTap struct {
+	link      linkMatch
+	x, y      float32
+	cancelled bool
+}
+
+func (tap *linkTap) moved(x, y float32) bool {
+	return math.Abs(float64(x-tap.x)) > 8 || math.Abs(float64(y-tap.y)) > 8
 }
 
 type pendingKey struct {
@@ -208,6 +219,7 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 			// Input methods drop their composition with the focus.
 			v.preedit, v.pending = "", nil
 			v.linkMods, v.linkPressed = 0, false
+			v.linkTap = nil
 			if v.mousePress != nil {
 				v.mousePress = nil
 				v.selecting, v.ticking = false, false
@@ -328,6 +340,9 @@ func (v *view) input(ev ui.InputEvent) bool {
 	case ui.InputPointerDown, ui.InputPointerUp, ui.InputPointerMove, ui.InputPointerCancel, ui.InputLongPress:
 		return v.pointerEvent(ev)
 	case ui.InputScroll:
+		if v.linkTap != nil {
+			v.linkTap.cancelled = true
+		}
 		return v.scroll(ev)
 	}
 	return false
@@ -619,6 +634,7 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 		}
 		v.selecting, v.ticking, v.linkPressed = false, false, false
 		v.touchSelecting = false
+		v.linkTap = nil
 		v.mousePress = nil
 		if v.gesture != nil {
 			v.gesture.Reset(v.screen())
@@ -631,12 +647,33 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 		}
 		return true
 	}
+	if tap := v.linkTap; tap != nil {
+		switch ev.Kind {
+		case ui.InputLongPress:
+			v.linkTap = nil // Continue into ordinary word selection.
+		case ui.InputPointerMove:
+			tap.cancelled = tap.cancelled || tap.moved(ev.X, ev.Y)
+			return true
+		case ui.InputPointerUp:
+			v.linkTap = nil
+			if ev.Button == 0 && !tap.cancelled && !tap.moved(ev.X, ev.Y) && v.linkAt(ev.X, ev.Y).Link == tap.link.Link {
+				opened = tap.link
+			}
+			return true
+		}
+	}
 	if t.opts.SelectOnDrag && ev.Mods&ui.Alt == 0 && ev.Button == 1 && (ev.Kind == ui.InputPointerDown || ev.Kind == ui.InputPointerUp) {
 		return false // Keep the terminal context menu available for local selection.
 	}
 	if ev.Kind == ui.InputPointerDown && ev.Button == 0 && ev.Mods&ui.Cmd != 0 {
 		if link := v.linkAt(ev.X, ev.Y); link.valid() {
 			opened, v.linkPressed = link, true
+			return true
+		}
+	}
+	if t.opts.OpenLinksOnTap && ev.Kind == ui.InputPointerDown && ev.Button == 0 && ev.Mods == 0 {
+		if link := v.linkAt(ev.X, ev.Y); link.valid() {
+			v.linkTap = &linkTap{link: link, x: ev.X, y: ev.Y}
 			return true
 		}
 	}

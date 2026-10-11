@@ -85,6 +85,9 @@ The terminal does what terminal apps do:
 - **Links**: Command+click (Control+click elsewhere) opens a hyperlink a
   program printed (OSC 8), or a URL printed as text, even while a program
   takes the mouse; the pointer is a hand over them while Command is held.
+  Set `Options.OpenLinksOnTap` for touch interfaces to open a link with an
+  ordinary tap on release. Swipes, cancelled contacts and long presses do
+  not open links; long presses still select text.
 - Shortcuts of the app come first: Command shortcuts on macOS are never
   sent to the program, and keys that the window or an element around the
   terminal handles with `Shortcut` go there.
