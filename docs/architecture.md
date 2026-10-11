@@ -210,6 +210,11 @@ termination callbacks are best-effort; background checkpoints happen within
 a bounded background task, and apps can save important edits explicitly.
 Cold URL/file entries are queued until shared readiness callbacks complete.
 
+The iOS power backend implements the shared `Power.KeepAwake` display lease
+with `UIApplication.idleTimerDisabled`. UI-thread lease accounting handles
+overlapping requests, and scene lifecycle gates the native setting so inactive
+and background scenes restore automatic idle. It grants no background runtime.
+
 The CLI compiles a launch Storyboard and packages matching overlay metadata.
 The shared `icon` setting generates a 1024-pixel opaque PNG in an Xcode app
 icon asset catalog; Xcode derives device sizes and bundle icon metadata.

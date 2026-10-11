@@ -22,6 +22,7 @@ void mygo_ios_ready(void);
 void mygo_ios_attach(uintptr_t view);
 void mygo_ios_watch_drawable(uintptr_t view, uintptr_t drawable);
 bool mygo_ios_is_main(void);
+void mygo_ios_idle_timer_disabled(bool disabled);
 void mygo_ios_dispatch(uint64_t token);
 void mygo_ios_step(void);
 void mygo_ios_wake(void);

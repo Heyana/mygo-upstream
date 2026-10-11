@@ -66,6 +66,10 @@ func (p *PowerModule) event(event string) {
 //	defer release()
 //
 // The reason shows where the system lists what keeps it awake.
+// On iOS, display=true disables automatic screen idle only while the scene
+// is active. Overlapping requests are released independently; inactive scenes
+// restore automatic idle. This does not grant background execution, and
+// display=false is a no-op on iOS.
 func (p *PowerModule) KeepAwake(reason string, display bool) (release func()) {
 	needsApp("Power.KeepAwake")
 	var r func()

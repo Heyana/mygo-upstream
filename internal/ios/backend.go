@@ -34,12 +34,14 @@ type Backend struct {
 	done   chan struct{}
 	quit   sync.Once
 	active bool
+	awake  displayWakeState
 }
 
 var current atomic.Pointer[Backend]
 
 func New() *Backend {
 	b := &Backend{Backend: unsupported.New(), done: make(chan struct{})}
+	b.awake.apply = func(disabled bool) { C.mygo_ios_idle_timer_disabled(C.bool(disabled)) }
 	current.Store(b)
 	return b
 }
@@ -309,6 +311,7 @@ func goIOSLifecycle(kind C.int) {
 	switch int(kind) {
 	case 0:
 		b.active = false
+		b.awake.setActive(false)
 		b.h.DidResignActive()
 		if b.window != nil {
 			b.window.h.Blurred()
@@ -316,6 +319,7 @@ func goIOSLifecycle(kind C.int) {
 		}
 	case 1:
 		b.active = true
+		b.awake.setActive(true)
 		b.h.DidBecomeActive()
 		if b.window != nil {
 			b.window.h.Focused()
@@ -331,10 +335,12 @@ func goIOSLifecycle(kind C.int) {
 			C.mygo_ios_memory(C.uintptr_t(b.window.view))
 		}
 	case 4:
+		b.awake.setActive(false)
 		b.h.Terminating()
 		b.Quit()
 	case 5:
 		b.active = false
+		b.awake.setActive(false)
 		b.h.DidEnterBackground()
 	case 6:
 		b.h.WillEnterForeground()
@@ -344,6 +350,7 @@ func goIOSLifecycle(kind C.int) {
 		}
 		b.h.Activated(b.window != nil)
 	case 8:
+		b.awake.setActive(false)
 		if b.active {
 			b.h.DidResignActive()
 			if b.window != nil {
