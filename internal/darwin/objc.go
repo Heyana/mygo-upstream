@@ -40,10 +40,12 @@ var (
 	msgSize          func(obj id, sel objc.SEL) NSSize
 	msgSetSize       func(obj id, sel objc.SEL, s NSSize)
 	msgSuperSetSize  func(sup uintptr, sel objc.SEL, s NSSize)
+	msgSuperPoint    func(sup uintptr, sel objc.SEL, p NSPoint) id
 	msgPoint         func(obj id, sel objc.SEL) NSPoint
 	msgSetPoint      func(obj id, sel objc.SEL, p NSPoint)
 	msgInitRect      func(obj id, sel objc.SEL, r NSRect) id
 	msgInitRectID    func(obj id, sel objc.SEL, r NSRect, a id) id
+	msgRectIDUint    func(obj id, sel objc.SEL, r NSRect, a id, n uint)
 	msgInitIDPoint   func(obj id, sel objc.SEL, a id, p NSPoint) id
 	msgInitWindow    func(obj id, sel objc.SEL, r NSRect, style uint, backing uint, deferFlag bool) id
 	msgColor         func(cls id, sel objc.SEL, r, g, b, a float64) id
@@ -130,10 +132,12 @@ func load() {
 		purego.RegisterFunc(&msgSize, msgSendAddr)
 		purego.RegisterFunc(&msgSetSize, msgSendAddr)
 		purego.RegisterFunc(&msgSuperSetSize, msgSendSuperAddr)
+		purego.RegisterFunc(&msgSuperPoint, msgSendSuperAddr)
 		purego.RegisterFunc(&msgPoint, msgSendAddr)
 		purego.RegisterFunc(&msgSetPoint, msgSendAddr)
 		purego.RegisterFunc(&msgInitRect, msgSendAddr)
 		purego.RegisterFunc(&msgInitRectID, msgSendAddr)
+		purego.RegisterFunc(&msgRectIDUint, msgSendAddr)
 		purego.RegisterFunc(&msgInitIDPoint, msgSendAddr)
 		purego.RegisterFunc(&msgInitWindow, msgSendAddr)
 		purego.RegisterFunc(&msgColor, msgSendAddr)
@@ -286,6 +290,14 @@ func sendSuperSize(self id, className string, s objc.SEL, size NSSize) {
 	var pin runtime.Pinner
 	defer pin.Unpin()
 	msgSuperSetSize(superOf(self, className, &pin), s, size)
+}
+
+// sendSuperPoint is sendSuper for a method taking an NSPoint and
+// returning an object, as hitTest:.
+func sendSuperPoint(self id, className string, s objc.SEL, p NSPoint) id {
+	var pin runtime.Pinner
+	defer pin.Unpin()
+	return msgSuperPoint(superOf(self, className, &pin), s, p)
 }
 
 func respondsTo(obj id, selector string) bool {

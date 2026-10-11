@@ -181,7 +181,9 @@ func (_handle ComboboxParts) Filtering() bool {
 }
 
 // Item creates an option: a row that is Highlighted when the pointer or
-// the arrows are on it, and that chooses value when clicked.
+// the arrows are on it, and that chooses value when clicked. The option
+// the highlight moves to scrolls into view, once, so that the wheel
+// scrolls on past it.
 func (_handle ComboboxParts) Item(value string) Element {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -585,11 +587,14 @@ func AccordionItem(c *Context, title string, open *bool, fn func()) Element {
 
 // AlertDialog shows an alert over the window while *open is true, as
 // AppKit's: title, message, and buttons, the last of which is the default,
-// in the accent color, with the focus, which Enter clicks. Escape clicks a
-// button labeled Cancel, if any; a click outside the alert does nothing.
-// It returns the index of the button clicked, in the frame it is, which
-// closes the alert, and -1 otherwise. Assistive technology sees an alert
-// named by title and described by message.
+// in the accent color, with the focus, which Enter clicks. Escape closes the
+// alert choosing no button, as canceling does, whatever the buttons say; a
+// click outside the alert does nothing. It returns the index of the button
+// clicked, in the frame it is, which closes the alert, AlertDismissed in
+// the frame Escape closes it, and -1 otherwise. An alert that must be
+// answered stays open by setting *open back to true on AlertDismissed.
+// Assistive technology sees an alert named by title and described by
+// message.
 //
 //	switch ui.AlertDialog(c, &app.asking, "Delete “Notes”?", "You can't undo this.", "Cancel", "Delete") {
 //	case 1:
@@ -908,8 +913,9 @@ func DateInput(c *Context, date *time.Time) Element {
 // DialogBase shows a dialog without a look over the window while *open is
 // true: fn styles the backdrop covering the window, which centers the
 // panel, and the panel, and builds the panel's content. Clicking the
-// backdrop or pressing Escape sets *open to false. It returns the panel,
-// or nil while closed; Modal is DialogBase with the theme's look.
+// backdrop or pressing Escape sets *open to false, which Dismissed
+// reports. It returns the panel, or nil while closed; Modal is DialogBase
+// with the theme's look.
 func DialogBase(c *Context, open *bool, fn func(backdrop Element, panel Element)) Element {
 	_ctx := c.build()
 	if _ctx == nil {
@@ -1259,7 +1265,8 @@ func Meter(c *Context, value float64, lo float64, hi float64, levels *MeterLevel
 }
 
 // Modal shows a dialog built by fn over a dimmed window while *open is
-// true; clicking outside it or pressing Escape sets *open to false.
+// true; clicking outside it or pressing Escape sets *open to false, which
+// Dismissed reports.
 func Modal(c *Context, open *bool, fn func()) Element {
 	_ctx := c.build()
 	if _ctx == nil {
@@ -1387,7 +1394,8 @@ func Overlay(c *Context, fn func()) {
 }
 
 // Popover shows fn's elements in a panel below anchor while *open is
-// true; clicking outside it or pressing Escape sets *open to false.
+// true; clicking outside it or pressing Escape sets *open to false, which
+// Dismissed reports.
 func Popover(c *Context, anchor Element, open *bool, fn func()) Element {
 	_ctx := c.build()
 	if _ctx == nil {
@@ -1403,8 +1411,9 @@ func Popover(c *Context, anchor Element, open *bool, fn func()) Element {
 
 // PopoverBase shows a panel without a look below anchor while *open is
 // true: fn styles the panel and builds its content. Pressing outside the
-// panel and the anchor, or Escape, sets *open to false; the press goes on
-// to what is under the pointer, as with the web's popovers. Where there is
+// panel and the anchor, or Escape, sets *open to false, which Dismissed
+// reports; the press goes on to what is under the pointer, as with the
+// web's popovers. Where there is
 // no room below the anchor, the panel shows above it; a top margin keeps
 // it apart from the anchor on either side. fn may place it elsewhere with
 // AttachTo, as to the right of the anchor:
@@ -2331,6 +2340,35 @@ func View(view func(c *Context)) *Content {
 	}())
 }
 
+// WebView shows a web view, made with mygo.Window.NewWebView, in the
+// element's content box. A web view has no size of its own: the element
+// stretches across its container (AlignSelf(Stretch)), and takes the room
+// along it with Grow or a size:
+//
+//	ui.Row(c).Fill().Children(func() {
+//		sidebar(c)
+//		ui.WebView(c, app.docs).Grow(1)
+//	})
+//
+// The web view shows while a frame builds its element and hides when one
+// does not, keeping its page: a view switching tabs builds the web view
+// of the tab shown. The element paints a hole through the window's
+// content (the web view is under it, the system's own view), as rounded
+// as its Radius and cut by the scroll containers and clips around it, so
+// that what paints after it shows over the page: its children, popovers,
+// menus, dialogs, tooltips and toasts. The page takes the pointer where
+// it shows and nothing painted over it takes it, and the keyboard once
+// clicked, focused (mygo.WebView.Focus) or tabbed into: Tab stops at the
+// element. Its background and border paint around the page, which its
+// opacity fades, and assistive technology finds the page inside it.
+func WebView(c *Context, v NativeWebView) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	return wrapElement(coreWebView(_ctx, v))
+}
+
 // Absolute takes the element out of its parent's layout and places it with
 // Top, Right, Bottom and Left relative to the parent's padding box, above
 // its siblings. As in CSS, that box is inside the parent's border but holds
@@ -2913,6 +2951,24 @@ func (_handle Element) Disabled(d bool) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Disabled(d))
+}
+
+// Dismissed reports whether pressing Escape or clicking outside closed the
+// dialog or popover (Modal, DialogBase, Popover, PopoverBase) returning the
+// element, in the frame it did, setting its *open to false: one that must
+// stay open sets it back to true.
+//
+//	if ui.Modal(c, &app.editing, edit).Dismissed() && app.unsaved {
+//		app.editing = true
+//	}
+func (_handle Element) Dismissed() bool {
+	_node := _handle.node()
+	if _node == nil {
+		return false
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Dismissed()
 }
 
 // Dividers draws a line width DIPs thick in color c between each two
@@ -4150,7 +4206,9 @@ func (_handle Element) Pressed() bool {
 // element it is attached to (AttachTo), nor the overlays attached to
 // elements inside it, as the popover of one of its buttons. A popover
 // closes then, the press going on to what is under the pointer, as
-// PopoverBase does.
+// PopoverBase does. The last press decides: one on the button opening a
+// popover after a press elsewhere, as on a web view's page, in the same
+// frame, keeps it open.
 func (_handle Element) PressedOutside() bool {
 	_node := _handle.node()
 	if _node == nil {
@@ -4942,7 +5000,8 @@ func (_handle SelectParts[T]) Highlight(value T) {
 
 // Item creates an option choosing value: a row that is Highlighted when
 // the pointer or the arrows are on it, and chooses value and closes the
-// popup when clicked.
+// popup when clicked. The option the highlight moves to scrolls into view,
+// once, so that the wheel scrolls on past it.
 func (_handle SelectParts[T]) Item(value T) Element {
 	_parts := _handle.resolve()
 	if _parts == nil {

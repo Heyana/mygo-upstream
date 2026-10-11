@@ -75,3 +75,10 @@ func (w *window) PrintToPDF(opts platform.PDFOptions, cb func(pdf []byte, err er
 }
 func (w *window) DroppedFiles() []string { return nil }
 func (w *window) Print()                 {}
+
+// Embedded web views and desktop flyouts are not available on UIKit yet.
+func (*window) NewWebView(*platform.WindowOptions, platform.WindowHandler) (platform.WebView, error) {
+	return nil, platform.ErrUnsupported
+}
+func (*window) PlaceWebViews([]platform.WebViewPlacement)  {}
+func (*window) PlaceFlyout(platform.Flyout, platform.Size) {}

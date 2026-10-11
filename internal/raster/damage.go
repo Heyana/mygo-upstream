@@ -293,7 +293,7 @@ func (r *Renderer) opBounds(s *scene.Scene, out []image.Rectangle) []image.Recta
 		op := &s.Ops[i]
 		var b image.Rectangle
 		switch op.Kind {
-		case scene.OpFill, scene.OpImage, scene.OpEffect:
+		case scene.OpFill, scene.OpImage, scene.OpEffect, scene.OpHole:
 			b = outset(op.Rect, 1)
 		case scene.OpShadow:
 			if op.Inset {

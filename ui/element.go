@@ -298,8 +298,12 @@ type node struct {
 	ellipsis  string
 	image     *Bitmap
 	svg       *SVG // of an Icon, or an Image in its own colors
+	webView   NativeWebView
 	fit       Fit
 	gray      bool
+	// dismissed: Escape or a click outside closed the dialog or popover
+	// whose panel this is, in this frame (Dismissed).
+	dismissed bool
 	rotate    float32 // of an Icon, in degrees
 	label     string
 	// widget names the widget that used the element's state as it created
