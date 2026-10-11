@@ -507,12 +507,18 @@ const formatVT = 1
 // palette is left out, as the terminal it restores in has colors of its
 // own.
 func (t *Terminal) VT() []byte {
-	opts := formatterOptions{size: unsafe.Sizeof(formatterOptions{}), emit: formatVT}
+	opts := formatterOptions{size: unsafe.Sizeof(formatterOptions{}), emit: formatVT, unwrap: true}
 	x := &opts.extra
 	x.size = unsafe.Sizeof(opts.extra)
 	x.modes, x.scrollingRegion, x.tabstops, x.pwd, x.keyboard = true, true, true, true, true
 	x.screen.size = unsafe.Sizeof(opts.extra.screen)
 	x.screen.cursor, x.screen.style, x.screen.hyperlink, x.screen.protection, x.screen.kittyKeyboard, x.screen.charsets = true, true, true, true, true, true
+	data := t.formatBytes(opts)
+	opts.emit = 2 // GHOSTTY_FORMATTER_FORMAT_HTML
+	return snapshotLinks(data, t.formatBytes(opts), t.snapshotCursorLink())
+}
+
+func (t *Terminal) formatBytes(opts formatterOptions) []byte {
 	var f uintptr
 	if formatterTerminalNew(0, &f, t.h, opts) != 0 {
 		return nil
