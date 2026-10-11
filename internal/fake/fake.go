@@ -23,6 +23,7 @@ var ErrNoReply = errors.New("fake: no reply")
 
 // Backend is a fake platform backend.
 type Backend struct {
+	SpeechStart           func(platform.SpeechOptions, func(platform.SpeechResult)) (platform.SpeechRecording, error)
 	BiometricStatus       platform.BiometricStatus
 	LastAuthentication    platform.AuthenticationOptions
 	AuthenticationError   error

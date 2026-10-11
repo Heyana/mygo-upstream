@@ -12,6 +12,9 @@
 #if MYGO_IOS_GEOLOCATION
 #import <CoreLocation/CoreLocation.h>
 #endif
+#if MYGO_IOS_SPEECH
+#import <Speech/Speech.h>
+#endif
 #import <UserNotifications/UserNotifications.h>
 
 static void permissionResult(uint64_t token, NSString *status, NSError *error) {
@@ -103,6 +106,24 @@ static MyGoLocationPermission *locationPermission;
 #endif
 void mygo_ios_permission(uint64_t token, const char *kind, bool request) {
   NSString *name = [NSString stringWithUTF8String:kind];
+#if MYGO_IOS_SPEECH
+  if ([name isEqual:@"speech"]) {
+    SFSpeechRecognizerAuthorizationStatus status = SFSpeechRecognizer.authorizationStatus;
+    NSString *(^nameForStatus)(SFSpeechRecognizerAuthorizationStatus) = ^NSString *(SFSpeechRecognizerAuthorizationStatus value) {
+      switch (value) {
+        case SFSpeechRecognizerAuthorizationStatusAuthorized: return @"granted";
+        case SFSpeechRecognizerAuthorizationStatusDenied: return @"denied";
+        case SFSpeechRecognizerAuthorizationStatusRestricted: return @"restricted";
+        default: return @"not-determined";
+      }
+    };
+    if (!request || status != SFSpeechRecognizerAuthorizationStatusNotDetermined) { permissionResult(token, nameForStatus(status), nil); return; }
+    if (!canRequest(token, @"NSSpeechRecognitionUsageDescription")) return;
+    [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus value) { permissionResult(token, nameForStatus(value), nil); }];
+    return;
+  }
+#endif
+
 #if MYGO_IOS_CAMERA || MYGO_IOS_MICROPHONE
   AVMediaType media = nil;
   NSString *purpose = nil;

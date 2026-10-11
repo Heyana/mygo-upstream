@@ -1365,6 +1365,11 @@ as in Tauri:
   pages are secure contexts with a real origin on every platform, which
   these APIs need. `macos.infoPlist` adds keys such as the camera and
   microphone usage descriptions macOS requires.
+- Live speech (`speech.go`, `internal/platform/speech.go`): Go owns provider
+  registration, contexts, capture limits and coalescing complete transcripts.
+  iOS translates to Speech/AVAudioEngine behind the speech+microphone capability
+  gates. Capture controls and native callbacks run on the main thread; other
+  backends return unsupported. Providers may implement cloud services in Go.
 - Flyouts (`flyout.go`, `internal/platform/flyout.go`): `NewFlyout`
   creates a window with `platform.WindowOptions.Flyout`, which backends
   make a borderless, transparent popup owned by its parent, and place

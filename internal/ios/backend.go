@@ -6,7 +6,7 @@ package ios
 
 /*
 #cgo CFLAGS: -x objective-c -fobjc-arc
-#cgo LDFLAGS: -framework UIKit -framework Foundation -framework QuartzCore -framework CoreGraphics -framework CoreText -framework Metal -framework IOSurface -framework AVFoundation -framework Photos -framework PhotosUI -framework UniformTypeIdentifiers -framework CoreLocation -framework UserNotifications -framework Security -framework LocalAuthentication
+#cgo LDFLAGS: -framework UIKit -framework Foundation -framework QuartzCore -framework CoreGraphics -framework CoreText -framework Metal -framework IOSurface -framework AVFoundation -framework Photos -framework PhotosUI -framework UniformTypeIdentifiers -framework CoreLocation -framework UserNotifications -framework Security -framework LocalAuthentication -framework Speech
 #include "native.h"
 #include <stdlib.h>
 */

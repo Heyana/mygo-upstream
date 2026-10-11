@@ -210,6 +210,7 @@ func (*Backend) RemoveNotification(string)                           {}
 func (*Backend) RemoveAllNotifications()                             {}
 func (*Backend) SystemManagedLifetime() bool                         { return false }
 func (*Backend) Sharing() platform.Sharing                           { return platform.UnsupportedSharing{} }
+func (*Backend) Speech() platform.SpeechRecognizer                   { return platform.UnsupportedSpeech{} }
 func (*Backend) Permissions() platform.Permissions                   { return platform.UnsupportedPermissions{} }
 func (*Backend) SecureStorage() platform.SecureStorage               { return platform.UnsupportedSecureStorage{} }
 func (*Backend) Authenticator() platform.Authenticator               { return platform.UnsupportedAuthenticator{} }

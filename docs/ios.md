@@ -492,7 +492,7 @@ view's build function, start a goroutine and publish the result with
 Protected native APIs are disabled by default. Opt in through
 `ios.capabilities`: `camera` (also enables the QR scanner), `microphone`,
 `geolocation`, `photos` (read/write and add-only authorization), or
-`biometrics`. The CLI compiles only the selected protected APIs; calls to
+`biometrics`, or `speech`. The CLI compiles only the selected protected APIs; calls to
 disabled APIs return `ErrUnsupported` without requesting access. Notifications,
 the system photo picker, and ordinary Keychain storage remain available.
 Direct Go builds can opt in with the corresponding `CGO_CFLAGS` definitions,
@@ -500,7 +500,7 @@ for example `-DMYGO_IOS_CAMERA=1`; otherwise all protected APIs stay disabled.
 
 `Permissions.Query` and `Permissions.Request` report the OS authorization
 decision separately from web origin policy. The supported permissions are
-camera, microphone, geolocation (while in use), notifications, photo library
+camera, microphone, speech recognition, geolocation (while in use), notifications, photo library
 and add-only photo access. States include not-determined, granted, denied,
 restricted, limited photo access and provisional notifications. Denial is a
 status rather than an error. Required purpose strings must be nonempty in
@@ -516,6 +516,44 @@ when the app returns to the foreground to observe changes.
 
 See [mobile progress](mobile-progress.md) for the remaining integrations and
 their verification requirements.
+
+## Live speech-to-text
+
+`mygo.Speech` provides live transcription using Apple's Speech framework and
+AVAudioEngine on iOS 15 and later. Enable both `speech` and `microphone` in
+`ios.capabilities`, and provide `NSSpeechRecognitionUsageDescription` and
+`NSMicrophoneUsageDescription` in `ios.infoPlist`. Other backends return
+`ErrUnsupported`.
+
+```go
+// Run authorization/preparation off the UI thread. For press-and-hold input,
+// authorize when opening the panel, before starting the hold gesture.
+if err := mygo.Speech.Authorize(ctx); err != nil { return err }
+session, err := mygo.Speech.Start(ctx, mygo.SpeechOptions{
+    Language: "zh-CN", OnDevice: true,
+    ContextualStrings: []string{"MyGo", "Codex"},
+})
+if err != nil { return err }
+for result := range session.Results() {
+    // Publish through window.Update or RunOnMain. Text replaces the full
+    // provisional transcript; Final or Err ends the stream.
+}
+```
+
+Call `Stop` on release to finish capture and await the final transcription;
+call `Cancel` or cancel the context to discard it. The capture limit defaults
+to 60 seconds. Backgrounding or audio interruption releases capture resources.
+After Stop, final recognition has a ten-second timeout. No audio is saved.
+`OnDevice: true` requires device and language support and forbids network
+recognition; there is no implicit cloud fallback. Show results as an editable
+draft and let the user choose when to insert or send them.
+
+`Speech.RegisterProvider(name, provider)` accepts a Go `SpeechProvider` for
+other services. A provider owns authorization, audio capture and authentication,
+and emits complete replacement transcripts. Its recording controls must be
+idempotent and safe from any goroutine, and completion must release capture
+resources. The shared session handles cancellation, duration limits and
+coalescing results. The built-in `apple` name is reserved.
 
 ## Secure storage
 

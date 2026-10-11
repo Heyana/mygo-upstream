@@ -191,6 +191,8 @@ func iosCheckPurposeStrings(info map[string]any, imports []string) error {
 			required["NSLocationWhenInUseUsageDescription"] = true
 		case "AVMediaTypeVideo":
 			required["NSCameraUsageDescription"] = true
+		case "OBJC_CLASS_$_SFSpeechRecognizer":
+			required["NSSpeechRecognitionUsageDescription"] = true
 		case "AVMediaTypeAudio":
 			required["NSMicrophoneUsageDescription"] = true
 		case "OBJC_CLASS_$_PHPhotoLibrary":
@@ -201,7 +203,7 @@ func iosCheckPurposeStrings(info map[string]any, imports []string) error {
 		}
 	}
 	var failures []error
-	for _, key := range []string{"NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSLocationWhenInUseUsageDescription", "NSPhotoLibraryUsageDescription", "NSPhotoLibraryAddUsageDescription", "NSFaceIDUsageDescription"} {
+	for _, key := range []string{"NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSLocationWhenInUseUsageDescription", "NSPhotoLibraryUsageDescription", "NSPhotoLibraryAddUsageDescription", "NSFaceIDUsageDescription", "NSSpeechRecognitionUsageDescription"} {
 		if !required[key] {
 			continue
 		}

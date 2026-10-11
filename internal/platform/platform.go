@@ -93,6 +93,7 @@ type Backend interface {
 	Sharing() Sharing
 	Permissions() Permissions
 	SecureStorage() SecureStorage
+	Speech() SpeechRecognizer
 	Authenticator() Authenticator
 	Mobile() Mobile
 	Clipboard() Clipboard

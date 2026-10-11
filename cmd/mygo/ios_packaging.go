@@ -27,7 +27,7 @@ func overrideIOSBuildNumber(c *Config, number string) error {
 func validateIOSPackaging(c *Config, o buildOptions) error {
 	for _, capability := range c.IOS.Capabilities {
 		switch capability {
-		case "camera", "microphone", "geolocation", "photos", "biometrics":
+		case "camera", "microphone", "geolocation", "photos", "biometrics", "speech":
 		default:
 			return fmt.Errorf("invalid ios.capabilities value %q", capability)
 		}
@@ -89,7 +89,7 @@ func iosCapabilityFlags(c *Config) string {
 		enabled[capability] = true
 	}
 	var flags strings.Builder
-	for _, capability := range []string{"camera", "microphone", "geolocation", "photos", "biometrics"} {
+	for _, capability := range []string{"camera", "microphone", "geolocation", "photos", "biometrics", "speech"} {
 		value := "0"
 		if enabled[capability] {
 			value = "1"

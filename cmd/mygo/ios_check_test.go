@@ -145,13 +145,14 @@ func TestIOSEncryptionDeclarationRejectsEmptyComplianceCode(t *testing.T) {
 }
 
 func TestIOSPurposeStringsCoverLinkedPermissionAPIs(t *testing.T) {
-	imports := []string{"_AVMediaTypeVideo", "_AVMediaTypeAudio", "_OBJC_CLASS_$_PHPhotoLibrary", "_OBJC_CLASS_$_LAContext"}
+	imports := []string{"_AVMediaTypeVideo", "_AVMediaTypeAudio", "_OBJC_CLASS_$_PHPhotoLibrary", "_OBJC_CLASS_$_LAContext", "_OBJC_CLASS_$_SFSpeechRecognizer"}
 	info := map[string]any{
-		"NSCameraUsageDescription":          "Test camera authorization.",
-		"NSMicrophoneUsageDescription":      "Test microphone authorization.",
-		"NSPhotoLibraryUsageDescription":    "Test photo library authorization.",
-		"NSPhotoLibraryAddUsageDescription": "Test add-only photo authorization.",
-		"NSFaceIDUsageDescription":          "Test local authentication.",
+		"NSCameraUsageDescription":            "Test camera authorization.",
+		"NSMicrophoneUsageDescription":        "Test microphone authorization.",
+		"NSSpeechRecognitionUsageDescription": "Test speech recognition authorization.",
+		"NSPhotoLibraryUsageDescription":      "Test photo library authorization.",
+		"NSPhotoLibraryAddUsageDescription":   "Test add-only photo authorization.",
+		"NSFaceIDUsageDescription":            "Test local authentication.",
 	}
 	if err := iosCheckPurposeStrings(info, imports); err != nil {
 		t.Fatal(err)

@@ -9,7 +9,7 @@ import (
 )
 
 func TestIOSCapabilitiesRejectUnknownAPIs(t *testing.T) {
-	c := &Config{IOS: IOS{Capabilities: []string{"camera", "microphone", "geolocation", "photos", "biometrics"}}}
+	c := &Config{IOS: IOS{Capabilities: []string{"camera", "microphone", "geolocation", "photos", "biometrics", "speech"}}}
 	if err := validateIOSPackaging(c, buildOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestIOSCapabilitiesExcludeProtectedImports(t *testing.T) {
 	}
 	// Use actual exported Go prototypes when compiling the UIKit scanner too.
 	generate := []string{"tool", "cgo", "-objdir", root, "--", "-x", "objective-c", "-fobjc-arc", "-isysroot", strings.TrimSpace(string(sdk)), "-target", "arm64-apple-ios15.0-simulator", "-I", bridge}
-	for _, source := range []string{"backend.go", "mobile.go", "presentation.go"} {
+	for _, source := range []string{"backend.go", "mobile.go", "presentation.go", "speech.go"} {
 		generate = append(generate, filepath.Join(bridge, source))
 	}
 	if out, err := exec.Command("go", generate...).CombinedOutput(); err != nil {
@@ -48,8 +48,9 @@ func TestIOSCapabilitiesExcludeProtectedImports(t *testing.T) {
 		"geolocation": {"_OBJC_CLASS_$_CLLocationManager"},
 		"photos":      {"_OBJC_CLASS_$_PHPhotoLibrary"},
 		"biometrics":  {"_OBJC_CLASS_$_LAContext"},
+		"speech":      {"_OBJC_CLASS_$_SFSpeechRecognizer"},
 	}
-	cases := [][]string{nil, {"camera"}, {"microphone"}, {"geolocation"}, {"photos"}, {"biometrics"}, {"camera", "microphone", "geolocation", "photos", "biometrics"}}
+	cases := [][]string{nil, {"camera"}, {"microphone"}, {"geolocation"}, {"photos"}, {"biometrics"}, {"speech"}, {"speech", "microphone"}, {"camera", "microphone", "geolocation", "photos", "biometrics", "speech"}}
 	for _, capabilities := range cases {
 		name := strings.Join(capabilities, "+")
 		if name == "" {
@@ -57,7 +58,7 @@ func TestIOSCapabilitiesExcludeProtectedImports(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			var imports strings.Builder
-			for _, source := range []string{"permissions.m", "authentication.m", "secrets.m", "native.m"} {
+			for _, source := range []string{"permissions.m", "authentication.m", "secrets.m", "native.m", "speech.m"} {
 				object := filepath.Join(root, name+"-"+source+".o")
 				args := []string{"--sdk", "iphonesimulator", "clang", "-c", "-fobjc-arc", "-O2", "-isysroot", strings.TrimSpace(string(sdk)), "-target", "arm64-apple-ios15.0-simulator", "-I", root, "-I", bridge}
 				// The default case also verifies direct builds with no CLI flags.

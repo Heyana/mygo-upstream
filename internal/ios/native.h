@@ -93,3 +93,7 @@ void mygo_ios_scan(uint64_t token, const char *json);
 void mygo_ios_scan_cancel(uint64_t token);
 void mygo_ios_network(uint64_t token, const char *url, double timeout);
 void mygo_ios_network_cancel(uint64_t token);
+
+char *mygo_ios_speech_start(uint64_t token, const char *json);
+void mygo_ios_speech_stop(uint64_t token);
+void mygo_ios_speech_cancel(uint64_t token);

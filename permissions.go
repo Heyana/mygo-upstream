@@ -12,6 +12,7 @@ type Permission string
 const (
 	PermissionCamera        Permission = "camera"
 	PermissionMicrophone    Permission = "microphone"
+	PermissionSpeech        Permission = "speech"
 	PermissionGeolocation   Permission = "geolocation"
 	PermissionNotifications Permission = "notifications"
 	PermissionPhotos        Permission = "photos"
@@ -55,7 +56,7 @@ func (PermissionModule) Request(kind Permission) (PermissionStatus, error) {
 func nativePermission(kind Permission, request bool) (PermissionStatus, error) {
 	needsApp("Permissions")
 	switch kind {
-	case PermissionCamera, PermissionMicrophone, PermissionGeolocation, PermissionNotifications, PermissionPhotos, PermissionPhotosAddOnly:
+	case PermissionCamera, PermissionMicrophone, PermissionSpeech, PermissionGeolocation, PermissionNotifications, PermissionPhotos, PermissionPhotosAddOnly:
 	default:
 		return "", fmt.Errorf("mygo: unknown permission %q", kind)
 	}
