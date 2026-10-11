@@ -71,6 +71,12 @@ func (h *headless) present(s *scene.Scene) {
 	h.last = s
 	h.img.Render(s)
 }
+func (h *headless) firstFramePresented() bool {
+	if h.last == nil {
+		h.requestFrame()
+	}
+	return h.last != nil
+}
 func (h *headless) framePath() string                          { return "drawn in memory" }
 func (h *headless) requestFrame()                              { h.requested.Store(true) }
 func (h *headless) setCursor(c Cursor)                         { h.cursor = c }

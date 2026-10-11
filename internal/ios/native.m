@@ -25,6 +25,9 @@ static UIWindow *hostWindow;
 static MyGoSurface *hostSurface;
 static BOOL goReady, goStarted, sceneActive;
 static int initialLifecycle;
+void mygo_ios_idle_timer_disabled(bool disabled) {
+  UIApplication.sharedApplication.idleTimerDisabled = disabled;
+}
 static NSMutableArray<NSURL *> *pendingURLs;
 static NSMutableArray<NSURL *> *pendingFiles;
 static void cancelPresentations(void);

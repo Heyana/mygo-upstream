@@ -216,6 +216,11 @@ termination callbacks are best-effort; background checkpoints happen within
 a bounded background task, and apps can save important edits explicitly.
 Cold URL/file entries are queued until shared readiness callbacks complete.
 
+The iOS power backend implements the shared `Power.KeepAwake` display lease
+with `UIApplication.idleTimerDisabled`. UI-thread lease accounting handles
+overlapping requests, and scene lifecycle gates the native setting so inactive
+and background scenes restore automatic idle. It grants no background runtime.
+
 The CLI compiles a launch Storyboard and packages matching overlay metadata.
 The shared `icon` setting generates a 1024-pixel opaque PNG in an Xcode app
 icon asset catalog; Xcode derives device sizes and bundle icon metadata.
@@ -1485,6 +1490,14 @@ control's pending request.
 See the [migration guide](ui/migration.md) for the breaking element API,
 `mygo migrate-ui`, and the Go type-aware lifetime checks in `mygo vet`.
 
+`ui.Startup` coordinates first-frame presentation with application readiness,
+then crossfades between two application-supplied UI builders, or switches
+directly with `SkipTransition`. Its state is
+per window and keyed component, respects Reduce Motion, and keeps content
+inert until completion. `surface.Conn.OnFirstFrame` carries the window's
+existing presentation acknowledgment into the toolkit; platform backends
+only report presentation. Branding and data-loading policy stay in the app.
+
 A window with `WindowOptions.Content` shows a user interface MyGo draws
 itself instead of a web page. The layers stay as everywhere else: the
 toolkit (`ui`) is plain Go above the platform contract, a backend only
@@ -1866,7 +1879,11 @@ either.
   move the focus (`flagKeepFocus`), and the popup closes as the input loses
   it. The option the arrows are on is the input's active descendant,
   which has the focus in the accessibility tree, as a list's chosen row
-  does, and reads as which of how many it is. Fields around an input (a
+  does, and reads as which of how many it is. `ComboboxParts.Inline` builds
+  the same options in normal layout for a search panel: it stays visible,
+  highlights the first option initially and after typing, and leaves Escape
+  to its containing dialog. Both modes scroll a highlighted option into view
+  only as the highlight changes. Fields around an input (a
   combobox's, a search field's, a token field's) name it with their
   Label (`nameFrom`). Backends treat combo boxes as text fields (macOS
   `AXComboBox`, ATK combo box with AtkEditableText, UIA ComboBox with

@@ -101,11 +101,36 @@ type windowHost struct {
 	detached  bool
 	// shown tells that a frame was presented, which makes the window
 	// ready to show.
-	shown bool
+	shown                               bool
+	firstFrameWatching, firstFrameShown bool
+	firstFrameOff                       func()
 	// placed is where the surface shows the window's web views, views
 	// the web views.
 	placed []platform.WebViewPlacement
 	views  []NativeWebView
+}
+
+func (h *windowHost) firstFramePresented() bool {
+	if !h.firstFrameWatching {
+		h.firstFrameWatching = true
+		if h.conn.OnFirstFrame != nil {
+			h.firstFrameOff = h.conn.OnFirstFrame(func() {
+				if !h.detached {
+					h.firstFrameShown = true
+					h.rt.changed()
+				}
+			})
+		}
+	}
+	if h.conn.OnFirstFrame == nil {
+		// Custom surface connections without a presentation hook use the
+		// completed submit path, as non-drawable backends do.
+		if !h.shown {
+			h.requestFrame()
+		}
+		return h.shown
+	}
+	return h.firstFrameShown
 }
 
 func (h *windowHost) framePath() string { return h.path }
@@ -420,6 +445,10 @@ func (h *windowHost) capture() (int, int, []byte) {
 
 func (h *windowHost) detach() {
 	h.detached = true
+	if h.firstFrameOff != nil {
+		h.firstFrameOff()
+		h.firstFrameOff = nil
+	}
 	if h.idleTimer != nil {
 		h.idleTimer.Stop()
 	}

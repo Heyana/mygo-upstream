@@ -61,6 +61,36 @@ func TestContentReadyToShow(t *testing.T) {
 	}
 }
 
+func TestContentStartupWaitsForFirstFrame(t *testing.T) {
+	startup := &ui.Startup{Ready: true, Duration: time.Second}
+	launches, homes := 0, 0
+	w := NewWindow(WindowOptions{Width: 300, Height: 200, Content: ui.View(func(c *ui.Context) {
+		startup.View(c, func() {
+			launches++
+			ui.Text(c, "Launch")
+		}, func() {
+			homes++
+			ui.Text(c, "Home")
+		})
+	})})
+	t.Cleanup(w.Destroy)
+	wins := fb.Windows()
+	s := wins[len(wins)-1].FakeSurface()
+	onMain(func() {
+		s.Frame()
+		if launches == 0 || homes != 0 {
+			t.Errorf("initial frame bypassed launch: launches=%d homes=%d", launches, homes)
+		}
+	})
+	onMain(func() {}) // process the window's presentation acknowledgment
+	onMain(func() {
+		s.Frame()
+		if homes == 0 {
+			t.Error("window presentation did not reach ui.Startup")
+		}
+	})
+}
+
 func TestContentDrawsAndHandlesInput(t *testing.T) {
 	clicks := 0
 	view := func(c *ui.Context) {

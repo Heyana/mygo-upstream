@@ -6,7 +6,7 @@ import (
 )
 
 // ComboboxParts are the parts of a combobox without a look: ComboboxBase
-// makes its text input, Popup its popup, and Item the options in it.
+// makes its text input, Popup or Inline its options panel, and Item its options.
 type comboboxParts struct {
 	// Input is the text input, whose text filters the options: style it,
 	// and name it with Label.
@@ -33,6 +33,7 @@ type comboboxParts struct {
 	shown     *string
 	chosen    string
 	isChosen  bool
+	inline    bool
 }
 
 // ComboboxBase creates a combobox without a look: a text input editing
@@ -95,7 +96,7 @@ func comboboxBase(c *context, text *string, first bool) *comboboxParts {
 		n := len(*p.values)
 		switch {
 		case !in.Focused():
-			if *p.open {
+			if !p.inline && *p.open {
 				open(false, false, -1)
 			}
 		case in.Changed():
@@ -121,7 +122,7 @@ func comboboxBase(c *context, text *string, first bool) *comboboxParts {
 		}
 		// Escape closes the popup; while it is closed, Escape is the
 		// dialog's.
-		if *p.open && in.Shortcut(0, KeyEscape) {
+		if !p.inline && *p.open && in.Shortcut(0, KeyEscape) {
 			open(false, false, -1)
 		}
 		if in.Submitted() && *p.open {
@@ -137,22 +138,25 @@ func comboboxBase(c *context, text *string, first bool) *comboboxParts {
 func (p *comboboxParts) choose(v string) {
 	p.chosen, p.isChosen = v, true
 	p.Input.st.submitted = false
-	*p.open, *p.typed, *p.highlight = false, false, -1
+	*p.typed = false
+	if !p.inline {
+		*p.open, *p.highlight = false, -1
+	}
 	p.c.rt.consumed = true
 }
 
 // Chosen returns the option the user chose in this frame, by a click or
-// Enter: ask it after Popup. It applies pending input to the controls built
-// so far, so the choice can be handled in the same build pass.
+// Enter: ask it after Popup or Inline. It applies pending input to the controls
+// built so far, so the choice can be handled in the same build pass.
 func (p *comboboxParts) Chosen() (string, bool) {
 	p.c.rt.applyInputs()
 	return p.chosen, p.isChosen
 }
 
-// Open reports whether the popup shows.
+// Open reports whether the options panel shows.
 func (p *comboboxParts) Open() bool { return *p.open }
 
-// SetOpen opens or closes the popup.
+// SetOpen opens or closes the popup. Inline always shows its panel.
 func (p *comboboxParts) SetOpen(o bool) {
 	if *p.open != o {
 		*p.open, *p.typed, *p.highlight = o, false, -1
@@ -164,6 +168,25 @@ func (p *comboboxParts) SetOpen(o bool) {
 // popup opened, which the options should match; it is not when the popup
 // opened by a click or Down, which shows them all.
 func (p *comboboxParts) Filtering() bool { return *p.typed }
+
+// Inline builds an always-visible options panel in the normal layout, as
+// below a search field in a command palette. Style panel and build its options
+// with Item. The first option is highlighted initially and after typing;
+// arrows, clicks and Chosen work as for Popup. Escape is left to the containing
+// dialog, and an empty panel stays visible so fn can show an empty-state message.
+// Call either Inline or Popup once per build, before asking Chosen.
+func (p *comboboxParts) Inline(fn func(panel *node)) *node {
+	p.inline = true
+	*p.open = true
+	p.next, p.items = p.next[:0], p.items[:0]
+	panel := coreBox(p.c).Role(RoleList)
+	panel.flags |= flagClickable | flagKeepFocus
+	panel.choosesItems = true
+	panel.Children(func() { fn(panel) })
+	p.finishOptions()
+	p.Input.expanded = len(p.next) > 0
+	return panel
+}
 
 // Popup shows the popup below the input, at least as wide, while it is
 // open: fn styles the panel and builds the options with Item. It returns
@@ -184,11 +207,24 @@ func (p *comboboxParts) Popup(fn func(panel *node)) *node {
 		panel.choosesItems = true
 		panel.Children(func() { fn(panel) })
 	})
+	p.finishOptions()
+	if len(p.next) == 0 {
+		panel.flags |= flagInvisible // nothing to show
+		return nil
+	}
+	return panel
+}
+
+func (p *comboboxParts) finishOptions() {
 	*p.values = append((*p.values)[:0], p.next...)
 	n := len(p.next)
+	if p.inline && *p.highlight < 0 && n > 0 {
+		*p.highlight = 0
+		p.c.rt.consumed = true
+	}
 	if *p.highlight == -2 || *p.highlight >= n {
 		*p.highlight = n - 1
-		c.rt.consumed = true
+		p.c.rt.consumed = true
 	}
 	for i, item := range p.items {
 		item.setPos, item.setSize = i+1, n
@@ -196,11 +232,6 @@ func (p *comboboxParts) Popup(fn func(panel *node)) *node {
 	if h := *p.highlight; h >= 0 && h < n {
 		p.Input.activeDescendant = p.items[h]
 	}
-	if n == 0 {
-		panel.flags |= flagInvisible // nothing to show
-		return nil
-	}
-	return panel
 }
 
 // Item creates an option: a row that is Highlighted when the pointer or

@@ -122,6 +122,29 @@ func (_handle *Router) View(c *Context, fn func(r *Route)) Element {
 	}()))
 }
 
+// View builds splash until startup is ready, then shows content, crossfading
+// unless SkipTransition is set.
+// Both builders use ordinary UI components and inherit the current theme.
+// Content is inert until the transition completes, including its keyboard
+// shortcuts and accessibility actions. The returned box fills its parent.
+func (_handle *Startup) View(c *Context, splash func(), content func()) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	return wrapElement(_handle.coreView(_ctx, func() func() {
+		if splash == nil {
+			return nil
+		}
+		return func() { splash() }
+	}(), func() func() {
+		if content == nil {
+			return nil
+		}
+		return func() { content() }
+	}()))
+}
+
 // Panel builds fn in the panel of the collapsible while it is open, and as
 // it opens and closes, when the panel grows and shrinks with Progress,
 // clipping what fn built. It returns the column holding what fn builds,
@@ -155,8 +178,8 @@ func (_handle CollapsibleParts) Progress() float32 {
 }
 
 // Chosen returns the option the user chose in this frame, by a click or
-// Enter: ask it after Popup. It applies pending input to the controls built
-// so far, so the choice can be handled in the same build pass.
+// Enter: ask it after Popup or Inline. It applies pending input to the controls
+// built so far, so the choice can be handled in the same build pass.
 func (_handle ComboboxParts) Chosen() (string, bool) {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -180,6 +203,27 @@ func (_handle ComboboxParts) Filtering() bool {
 	return _parts.Filtering()
 }
 
+// Inline builds an always-visible options panel in the normal layout, as
+// below a search field in a command palette. Style panel and build its options
+// with Item. The first option is highlighted initially and after typing;
+// arrows, clicks and Chosen work as for Popup. Escape is left to the containing
+// dialog, and an empty panel stays visible so fn can show an empty-state message.
+// Call either Inline or Popup once per build, before asking Chosen.
+func (_handle ComboboxParts) Inline(fn func(panel Element)) Element {
+	_parts := _handle.resolve()
+	if _parts == nil {
+		return Element{}
+	}
+	_ctx := _parts.c
+	_ = _ctx
+	return wrapElement(_parts.Inline(func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}()))
+}
+
 // Item creates an option: a row that is Highlighted when the pointer or
 // the arrows are on it, and that chooses value when clicked. The option
 // the highlight moves to scrolls into view, once, so that the wheel
@@ -194,7 +238,7 @@ func (_handle ComboboxParts) Item(value string) Element {
 	return wrapElement(_parts.Item(value))
 }
 
-// Open reports whether the popup shows.
+// Open reports whether the options panel shows.
 func (_handle ComboboxParts) Open() bool {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -223,7 +267,7 @@ func (_handle ComboboxParts) Popup(fn func(panel Element)) Element {
 	}()))
 }
 
-// SetOpen opens or closes the popup.
+// SetOpen opens or closes the popup. Inline always shows its panel.
 func (_handle ComboboxParts) SetOpen(o bool) {
 	_parts := _handle.resolve()
 	if _parts == nil {
