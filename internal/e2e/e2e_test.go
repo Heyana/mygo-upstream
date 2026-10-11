@@ -1,3 +1,5 @@
+//go:build !js
+
 // Package e2e drives the real native backend. It needs a desktop session,
 // so it only runs with MYGO_E2E=1:
 //

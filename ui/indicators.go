@@ -7,13 +7,14 @@ import (
 )
 
 // Spinner creates an indicator of work of unknown length, as AppKit's
-// spinning progress indicator: spokes turning, as high as the font size.
-// Assistive technology sees a progress indicator of unknown length; name
-// it with Label.
+// spinning progress indicator: spokes turning, as high as the font size,
+// in the theme's muted text color, or the color TextColor gives it, as one
+// on a chosen row of a list needs. Assistive technology sees a progress
+// indicator of unknown length; name it with Label.
 func coreSpinner(c *context) *node {
 	t := c.theme
 	size := t.FontSize * 1.25
-	e := coreBox(c).Size(size, size).Shrink(0).Role(RoleProgress)
+	e := coreBox(c).Size(size, size).Shrink(0).Role(RoleProgress).TextColor(t.TextMuted)
 	e.widget = "Spinner"
 	e.hasRange, e.accRange = true, [3]float64{0, 1, -1}
 	e.Draw(func(p *Painter, r Rect) {
@@ -33,7 +34,7 @@ func coreSpinner(c *context) *node {
 			alpha := 1 - float32(age)/spokes*0.85
 			var path Path
 			path.MoveTo(at(0, -in)).LineTo(at(0, -out))
-			p.StrokePath(&path, w, t.TextMuted.Alpha(alpha))
+			p.StrokePath(&path, w, e.ts.color.Alpha(alpha))
 		}
 	})
 	return e

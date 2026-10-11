@@ -50,6 +50,12 @@ import (
 // sidebar choosing the pages, where it stays: screen readers then hear
 // the title of the page. Pages slide or fade in (Transition).
 //
+// In a browser, the first router a window shows follows the history of
+// the browser's tab, in the URL's fragment, as "#/notes/42": going to a
+// page adds an entry to it, the browser's back and forward buttons go
+// through the router's pages, and a URL with a fragment opens the app at
+// its page.
+//
 // The zero Router shows "/". As the rest of the app's state, it is read
 // and changed on the main thread: from another goroutine, change it in
 // Window.Update.
@@ -70,7 +76,10 @@ type Router struct {
 
 	entries []*routeEntry
 	at      int
-	pages   uint64
+	// base numbers entries[0] among all the entries the history had, as
+	// the oldest go: a browser's history refers to them by number.
+	base  int
+	pages uint64
 	// rt is the window showing the router, which a change asks for a
 	// frame.
 	rt *engine
@@ -215,11 +224,15 @@ func (r *Router) Push(target string) {
 	e := &routeEntry{loc: loc, restoring: cur.restoring}
 	e.pages, e.layouts = shared(cur, p)
 	r.entries = append(r.entries[:r.at+1], e)
-	if len(r.entries) > maxHistory {
-		r.entries = r.entries[len(r.entries)-maxHistory:]
+	if n := len(r.entries) - maxHistory; n > 0 {
+		r.entries = r.entries[n:]
+		r.base += n
 	}
 	r.at = len(r.entries) - 1
 	r.changed()
+	if browserHistory != nil {
+		browserHistory.pushed(r)
+	}
 }
 
 // Replace shows the page at target in place of the page shown, in its
@@ -244,6 +257,9 @@ func (r *Router) Replace(target string) {
 		r.entries[r.at] = e
 	}
 	r.changed()
+	if browserHistory != nil {
+		browserHistory.replaced(r)
+	}
 }
 
 // Back shows the page before, if any.
@@ -279,9 +295,25 @@ func (r *Router) Go(n int) {
 	r.current()
 	at := max(0, min(r.at+n, len(r.entries)-1))
 	if at != r.at {
+		moved := at - r.at
 		r.at = at
 		r.changed()
+		if browserHistory != nil {
+			browserHistory.went(r, moved)
+		}
 	}
+}
+
+// browserHistory is the history of the browser's tab the app runs in,
+// which the first router a window shows follows (router_js.go): it hears
+// of the router's changes. It is nil elsewhere.
+var browserHistory interface {
+	// claim makes r the router following the history, unless another
+	// one does.
+	claim(r *Router)
+	pushed(r *Router)
+	replaced(r *Router)
+	went(r *Router, n int)
 }
 
 // CanGoBack reports whether there is a page to go back to, and
@@ -518,6 +550,9 @@ func (r *Route) coreView(c *context, fn func(r *Route)) *node {
 // going away too, which takes neither the pointer nor the keyboard.
 func (r *Router) coreView(c *context, fn func(r *Route)) *node {
 	r.rt = c.rt
+	if browserHistory != nil {
+		browserHistory.claim(r)
+	}
 	box := coreColumn(c).Grow(1).AlignSelf(Stretch).MinWidth(0).MinHeight(0)
 	box.widget = "Router"
 	wrapElement(box).Bind(&r.Handle)

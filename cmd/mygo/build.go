@@ -56,8 +56,12 @@ outside the Mac App Store, and macos.notarize to notarize the disk image.
 With updates in mygo.json and the key of mygo keygen in
 MYGO_UPDATER_PRIVATE_KEY, each platform also gets a signed update archive,
 delta updates from the last versions published (updates.deltas), and
-update-<platform>.json: publish them where updates point to.`)
-	platforms := flags.String("platform", runtime.GOOS+"/"+runtime.GOARCH, "comma separated GOOS/GOARCH targets, e.g. darwin/universal,linux/amd64,windows/amd64,ios/arm64")
+update-<platform>.json: publish them where updates point to.
+
+The platform web (or js/wasm) builds an app of native UI for browsers into
+<out>/web: index.html, which loads the app, Go's wasm_exec.js and the app's
+WebAssembly, named by its content: a static site, to serve from anywhere.`)
+	platforms := flags.String("platform", runtime.GOOS+"/"+runtime.GOARCH, "comma separated GOOS/GOARCH targets, e.g. darwin/universal,linux/amd64,windows/amd64,ios/arm64, or web for browsers")
 	iosSimulator := flags.Bool("ios-simulator", false, "build ios/arm64 for the iOS simulator")
 	iosTeam := flags.String("ios-team", "", "Apple development team (default: ios.developmentTeam; unset builds unsigned)")
 	iosDevice := flags.String("ios-device", "", "iPhone/iPad UDID to include in development provisioning (requires -ios-team)")
@@ -143,6 +147,14 @@ update-<platform>.json: publish them where updates point to.`)
 
 	var built []string
 	for _, p := range splitList(*platforms) {
+		if isWebPlatform(p) {
+			paths, err := buildWeb(c, opts)
+			built = append(built, paths...)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		goos, goarch, ok := strings.Cut(p, "/")
 		if !ok {
 			return fmt.Errorf("invalid platform %q, want GOOS/GOARCH", p)

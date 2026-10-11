@@ -26,7 +26,9 @@ framework safely. Read it before changing anything under `internal/`.
   on Windows (amd64 and arm64); no browser engine is bundled. Native UI is
   drawn by MyGo itself, in Go, with Metal, Direct3D 11 or OpenGL, or on the
   CPU, and text from the system's own engines (see [Native UI](#native-ui-ui));
-  an app whose windows all show it needs no webview at all. On unsupported
+  an app whose windows all show it needs no webview at all, and runs in
+  browsers too, compiled to WebAssembly, on canvases drawn with WebGL 2
+  (see [Browsers](#browsers-internalweb)). On unsupported
   platforms the `internal/unsupported` backend makes `App.Run` fail with a
   clear error while everything still compiles.
 - **Bun is dev tooling only.** It builds and tests the TypeScript bridge, and
@@ -68,6 +70,7 @@ framework safely. Read it before changing anything under `internal/`.
 │   ├── ios/            iOS: UIKit host and input bridge (cgo), native Go UI
 │   ├── linux/          Linux: GTK 3 + WebKitGTK through dlopen
 │   ├── windows/        Windows: Win32 + WebView2 through syscall and COM
+│   ├── web/            browsers (js/wasm): native UI on canvases, through syscall/js
 │   ├── unsupported/    stub for other platforms
 │   ├── fake/           in-memory backend for unit tests
 │   ├── bridge/         embeds bridge.js, built from packages/bridge
@@ -79,7 +82,7 @@ framework safely. Read it before changing anything under `internal/`.
 │   ├── gpu/            the instances GPU renderers draw, and gputest/ for their tests
 │   ├── gpu/d3d11/      the Direct3D 11 renderer of scenes, and device/ for its devices
 │   ├── gpu/metal/      the Metal renderer of scenes
-│   ├── gpu/gl/         the OpenGL renderer of scenes
+│   ├── gpu/gl/         the OpenGL and WebGL 2 renderer of scenes
 │   ├── svg/            SVG parsing and drawing, for icons and images
 │   ├── tsgen/          TypeScript client generator
 │   ├── accelerator/    parses "CmdOrCtrl+Shift+K"
@@ -112,7 +115,7 @@ framework safely. Read it before changing anything under `internal/`.
 ## Layers
 
 ```
- user code ──► package mygo ──► platform.Backend ──► darwin | linux | windows | unsupported
+ user code ──► package mygo ──► platform.Backend ──► darwin | linux | windows | web | unsupported
                  ▲    │               ▲                  │
                  │    └─ handlers ────┘ (AppHandler,     └─ purego ─► AppKit/WebKit, GTK/WebKitGTK
                  │                       WindowHandler)
@@ -621,6 +624,140 @@ and APNs delivery remain external application configuration.
   manifest for executables without one); their structs are packed and laid
   out by hand. Notifications are notification-area balloons, which Windows
   10+ shows as toasts.
+
+### Browsers (`internal/web`)
+
+With `GOOS=js GOARCH=wasm`, `backend_js.go` picks `internal/web`, which
+shows windows of native UI (`WindowOptions.Surface`) on a page; windows of
+web pages, menus, trays, notifications, global shortcuts and file dialogs
+report `errUnsupported` or do nothing, as the browser has nothing to stand
+for them. Building for browsers adds nothing to desktop builds: the
+backend, `load_js.go` and `canvas_js.go` are `js` only, and the contract
+gained one field, `SurfaceNative.Canvas`.
+
+- **Size.** What only web pages use would make most of a build for
+  browsers, which servers send whole (Cloudflare's static files are at
+  most 25 MiB): the root's files for pages leave it out. `ipc.go`,
+  `channel.go`, `bridge.go` (what windows say to the bridge: its script,
+  messages, `Eval`), `protocol.go` (custom schemes, the frontend's, their
+  downloads), `typescript.go`, `updater.go` (and `relaunchNow`),
+  `single_instance.go`, `window_state.go` and `random.go` have twins
+  (`_js.go`) that keep their API and do nothing, or report that there is
+  no page, without the packages they need: net/http, net, crypto,
+  encoding/json, internal/tsgen with go/parser, internal/update. Only
+  `Protocol.Handle`, `HandleFunc` and `FileServer`, which take net/http's
+  types, are missing there. `Bind` binds nothing, so nothing calls
+  `reflect.Value.Method`, which would make the linker keep every exported
+  method of every type in an interface. `internal/platform` takes an
+  `http.Header` as its type, `map[string][]string`, so that ui does not
+  import net/http either (importing it alone adds 2.3 MB), and
+  `gpu.SourceSum`, for shaders compiled ahead of time, is not built for
+  browsers, with crypto/sha256. The root's tests and `internal/e2e` are
+  for desktops. What stays is mostly the runtime, ui and its packages,
+  and the image codecs (`ui.Image`): `website/docs-demo` comes to about
+  9.8 MB (2.6 MB with gzip).
+
+- **Threading.** Go's main goroutine, which calls `Run`, is the main
+  thread, told by its goroutine ID as `internal/fake` does. JavaScript
+  calls Go's functions (`js.FuncOf`) on goroutines of their own, while
+  the browser's event loop waits: `Backend.sync` hands the event to the
+  main goroutine through `tasks` and waits for it, so that a handler can
+  still call `preventDefault`. A callback that a call from Go to
+  JavaScript sets off (a `focus()` firing `focus`) runs on the calling
+  goroutine, the main one, and so runs at once. `Step`, for nested loops
+  (`await`, `PopupMenu`), takes tasks as `Run` does, so the browser's
+  events go on meanwhile; a nested loop must not start in a task, whose
+  callback holds the browser's event loop, but from `Dispatch`.
+- **Windows** are elements of class `mygo-window` filling the element with
+  the ID `mygo`, or else the page, each holding a canvas and a textarea.
+  The page sets their size; `Bounds` reads the element's. The surface's
+  size is the canvas's CSS size (DIPs) and `devicePixelRatio`, which a
+  `ResizeObserver` and the window's `resize` watch; its backing store is
+  set before each frame to the frame's size, `ceil(width × scale)` as
+  package ui computes it. `RequestFrame` asks `requestAnimationFrame`;
+  `Occluded` is `document.hidden`, where browsers give no frames, and
+  `visibilitychange` brings `SurfaceShown`.
+- **Drawing.** The canvas's WebGL 2 context (`gl.NewContext`: premultiplied
+  alpha, no depth, stencil or antialiasing) is current while a frame is
+  handled, as a GtkGLArea's is in its render signal, and
+  `SurfaceNative.Canvas` names it for `ui/gpu_js.go`. WebGL names its
+  objects by JavaScript objects and GL by numbers: `load_js.go` numbers
+  them (the number also a property of the object, which reads
+  `FRAMEBUFFER_BINDING` back) and implements the GL functions `gl.go`
+  calls on the current context, copying Go's bytes into one reused
+  `Uint8Array` for uploads, which the pixel store's unpacking (tracked
+  from `glPixelStorei`) sizes. With `WEBGL_blend_func_extended` the
+  shader writes the second color as on desktops; without it (one color
+  blended) subpixel glyphs could not draw, which browsers' text never
+  has. A lost context is kept (`preventDefault`) and, once restored,
+  renumbered (`Context.Renew`), which makes the renderer start over.
+  Where the browser has no WebGL 2, the canvas takes a 2D context and
+  `PresentPixels` puts the frames drawn in memory into an `ImageData`.
+- **Text** (`internal/text/canvas_js.go`) is the browser's: a 2D context
+  measures and draws it, so that it finds fonts, falls back and shapes as
+  for pages. Canvases give widths, not glyphs: the engine's glyphs are
+  grapheme clusters (go-text's segmenter), each ending where the text of
+  its word through it ends and starting its own width before, so that the
+  word's kerning moves the cluster it applies to; they are drawn alone,
+  with the font at the size they were measured at and the canvas scaled
+  (at the pixels' size the system's font may take another optical size,
+  as SF Pro Display for Text, whose glyphs the advances would not fit),
+  their coverage read back (`getImageData` of a `willReadFrequently`
+  context) and cropped to the ink. A line of text draws as the browser's
+  `fillText` draws it whole, pixel for pixel. Fonts are shaded: a glyph is
+  drawn in a gray of its text's shade, as Chrome's text, like AppKit's,
+  is bolder the lighter its color (dark text drawn with white glyphs looks
+  too bold), Thick in white; emoji take an unshaded twin of their font.
+  Runs of scripts whose letters join or reorder (Arabic, the scripts of
+  India, Thai, …) are one glyph each, shaped whole. Lines break at
+  UAX #14's opportunities, and go-text's bidi package gives runs' levels,
+  which the engine reorders (UAX #9's L2). Glyph IDs number the clusters'
+  texts. Glyphs blend in turn (`join` false), at quarter-pixel positions,
+  as Skia draws them. Chrome picks the optical size of the system font
+  inconsistently between pages and canvases, so text of native UI can be
+  wider or narrower than a page's in the same font.
+- **Input.** Pointer events (captured on press) are the pointer, with
+  clicks counted from presses close in time and place, buttons 3 and 4
+  the back and forward keys; `wheel` events scroll, lines and pages
+  turned into DIPs, notches of 120 not `Precise`. The textarea, out of
+  sight at the caret (`SetTextInput`), has the keyboard: `keydown` and
+  `keyup` are keys, by what they type (`key`) and else by where they are
+  (`code`); `beforeinput` brings typed text, which it cancels so that the
+  textarea stays empty; composition events are the input method's. The
+  browser keeps its defaults for keys that type, its own keys (F5, F11,
+  F12) and those copying and pasting: the content copies on the key and
+  the `copy` event that follows carries its text (the backend's
+  clipboard) to the system's, while the clipboard's text comes with
+  `paste`, which then sends the paste command. On a Mac, Command is
+  `ModCtrl` and Control `ModSuper`, as package ui takes browsers for
+  another system than macOS.
+- **Files dropped** (`files.go`): `dragover` on the canvas, with files,
+  is `FileDragOver`, whose answer is the `dropEffect`, and the browser's
+  default (opening the file, leaving the app) is always prevented; a
+  `drop` reads the files' bytes (`arrayBuffer`, settled together; folders
+  have none) before `FileDrop` gives their paths, `/mygo-drop/<n>/<name>`.
+  Go's syscall package calls the `fs` object of `wasm_exec.js`, whose
+  functions fail in browsers: the backend wraps `open`, `read`, `fstat`,
+  `close`, `stat`, `lstat` and `readdir` to answer for those paths,
+  synchronously, as an app reads a drop in its handler, while the browser
+  waits on the callback that sent the drop, and passes other paths on.
+- **Context menus** (`PopupMenu`) are HTML, styled as macOS's, in a nested
+  loop until an item is chosen, a press lands elsewhere, Escape is pressed
+  or the page loses focus; the choice goes to `MenuItemClicked`.
+- **Themes**: `IsDark` and `Preferences` read `matchMedia`, whose changes
+  call `ThemeChanged`; the root's `data-mygo-theme` (watched by a
+  `MutationObserver`) chooses the appearance over the media's. `ShowMessageBox` uses `alert` and `confirm`.
+- **History** (`ui/router_js.go`): the first `ui.Router` a window (not a
+  `Tester`) shows claims the tab's history, through hooks the router calls
+  (`browserHistory`, nil elsewhere). Its location goes in the URL's
+  fragment and the number of its entry (`Router.base + at`, `base`
+  counting the entries dropped past `maxHistory`) in `history.state`:
+  `Push` is `pushState`, `Replace` `replaceState`, `Go` `history.go`,
+  whose `popstate` finds the router there already. A `popstate` of the
+  browser's own buttons goes to the entry of its number; one just before
+  the router's first or after its last, as after a reload (which takes
+  the number of the browser's entry for the router's), becomes the
+  router's; a fragment typed in, without a state, is pushed.
 
 ## IPC
 
@@ -1356,9 +1493,9 @@ either.
 
 ```
  view (Go) ──► ui: build, layout, paint ──► internal/scene ──► internal/gpu: d3d11 | metal | gl, or internal/raster
-                 ▲       └─ internal/text: DirectWrite | Core Text | Pango, glyph and mask atlases
+                 ▲       └─ internal/text: DirectWrite | Core Text | Pango | canvas, glyph and mask atlases
                  │
- internal/surface.Conn ◄── content.go (package mygo) ◄── platform.Surface: darwin | linux | windows | fake
+ internal/surface.Conn ◄── content.go (package mygo) ◄── platform.Surface: darwin | linux | windows | web | fake
 ```
 
 - **The surface.** With `platform.WindowOptions.Surface`, a backend creates
@@ -2138,7 +2275,8 @@ either.
   (`IDWriteTextLayout`, with an `IDWriteTextRenderer` implemented in Go
   collecting its glyph runs), Core Text on macOS (`CTTypesetter`, with
   `NSFont` for the system font's weights) and Pango on Linux (with
-  fontconfig and HarfBuzz underneath, as in GTK). They find the fonts, fall
+  fontconfig and HarfBuzz underneath, as in GTK); in browsers, a canvas's
+  2D context (`canvas_js.go`, see [Browsers](#browsers-internalweb)). They find the fonts, fall
   back to other fonts for what one lacks, shape, run the bidirectional
   algorithm and break lines; font files stay memory mapped and shared with
   every other process. The package assembles their lines into layouts, with
@@ -2364,7 +2502,10 @@ either.
     attributes, pointed at each batch's first since OpenGL ES 3.0 has no
     base instance. The area's `create-context` asks GDK for OpenGL 3.3,
     else OpenGL ES 3.0, as GPUs with OpenGL ES alone have, and so does
-    the probe below (`glContext`).
+    the probe below (`glContext`). In browsers the same renderer draws
+    with WebGL 2, which is OpenGL ES 3.0 (see
+    [Browsers](#browsers-internalweb)): only where its functions come from
+    differs, `load_linux.go` or `load_js.go`.
 
   Linux draws with OpenGL only where it runs on a GPU. A GL context loads
   Mesa for good: some 50 MB of libraries (LLVM, which distributions' Mesa
@@ -2475,6 +2616,15 @@ renderer's (`gputest.Compare`).
 
 ## CLI (`cmd/mygo`)
 
+- Browsers (`web.go`): `build -platform web` (or `js/wasm`) compiles the
+  app with `GOOS=js GOARCH=wasm` and the production flags into `<out>/web`,
+  with a page of its own (`webPage`: a spinner while the WebAssembly loads)
+  and the `wasm_exec.js` of the Go that compiled it, which must match.
+  `dev -web` serves the page, the loader and the last build that compiled
+  from memory (`webDev`), rebuilds on the watcher's changes as the desktop
+  loop does, and tells pages through server-sent events (`/__mygo/events`):
+  `reload` after a build, `build-error` with the compiler's output, which
+  the page shows over the app until a build compiles.
 - `init` renders `cmd/mygo/template`: a Go module and a TypeScript frontend
   built with Vite, side by side at the project root like the examples, draws
   a default icon at `resources/icon.png`, fetches modules, installs the
@@ -2726,6 +2876,12 @@ shader generation commands are listed in [AGENTS.md](../AGENTS.md).
 | native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/svg ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS, OpenGL on Linux); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; SVG parsing and drawing, with `FuzzParse`; `go test -run '^$' -bench . ./ui` times a frame |
 | GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open, native UI (frames, clicks, input methods replacing typed text, file drops, assistive technology reading and acting; on macOS typing, skipped while an input method is selected, and composing; on Linux with `MYGO_GPU=1`, what OpenGL drew in the GtkGLArea, from the first frame and once a window drawing in memory asks for the GPU); on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
 
+Browsers run the `js` tests of the renderer, the text engine and package
+ui: `GOOS=js GOARCH=wasm go test -c` builds a test binary, which a page
+loads with `wasm_exec.js`, its arguments in `go.argv`, and logs to the
+console. Under Node (`$(go env GOROOT)/lib/wasm/go_js_wasm_exec`), with no
+page, the WebGL tests skip and text falls back to the stub engine.
+
 The XDG variables let the URL scheme test check that GLib opens the scheme
 with the handler it registered; without them it writes to temporary
 directories, which GLib does not see.
@@ -2883,8 +3039,9 @@ which npm allows only for packages that exist: the first release uses an
 2. **Extend `internal/platform`** with the smallest mechanism the backends
    need: main-thread only, synchronous, or with a callback that runs on the
    main thread exactly once.
-3. **Implement it in every backend**: `darwin`, `linux`, `windows`, `fake`
-   and `unsupported` (return `platform.ErrUnsupported` or a zero value).
+3. **Implement it in every backend**: `darwin`, `linux`, `windows`, `web`,
+   `fake` and `unsupported` (return `platform.ErrUnsupported` or a zero
+   value).
    Create callbacks once, never per call.
 4. **Wire the core**: hop with `onMain`/`onMainValue`, or `postMain` + `await`
    + `deliver` for asynchronous native results. Start with `needsApp` when

@@ -838,10 +838,10 @@ func Column(c *Context) Element {
 // Combobox creates a combobox choosing *selected among options: a field
 // showing the choice, whose text filters the options below it as the user
 // types, those starting with it first, while a click or Down shows them
-// all. Up and Down move among them and Enter chooses, as does a click;
-// Escape closes them, and the text goes back to the choice when the
-// field loses the focus. Changed reports a new choice. Name it with
-// Label.
+// all; a click showing them selects the choice, for typing to replace.
+// Up and Down move among them and Enter chooses, as does a click; Escape
+// closes them, and the text goes back to the choice when the field loses
+// the focus. Changed reports a new choice. Name it with Label.
 //
 //	ui.Combobox(c, &app.font, fonts).Label("Font")
 func Combobox(c *Context, selected *string, options []string) Element {

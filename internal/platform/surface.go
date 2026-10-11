@@ -184,6 +184,10 @@ type SurfaceNative struct {
 	// GtkGLArea while its render signal draws a frame with OpenGL, in the
 	// context it made current (Linux).
 	Widget, GLArea uintptr
+	// Canvas is the number of the canvas's WebGL 2 context (package gl's
+	// Context.ID), current while SurfaceFrame events are handled
+	// (browsers).
+	Canvas uintptr
 }
 
 // RectF is a rectangle in DIPs with fractional coordinates.

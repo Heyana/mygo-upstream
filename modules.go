@@ -2,7 +2,6 @@ package mygo
 
 import (
 	"bytes"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"image/png"
@@ -572,7 +571,7 @@ func NewNotification(opts NotificationOptions) *Notification {
 	id := opts.ID
 	if id == "" {
 		// Unique across runs too, as notifications outlive them.
-		id = "mygo-" + rand.Text()
+		id = "mygo-" + randomText()
 	}
 	opts.Data = maps.Clone(opts.Data)
 	if opts.Badge != nil {

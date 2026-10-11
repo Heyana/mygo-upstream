@@ -97,6 +97,8 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
 - [Inspector](inspector.md): the elements of a window, their boxes and
   styles, and the time frames take, beside the content.
 - [Rendering](rendering.md): how MyGo draws, on the GPU or the CPU.
+- [Browsers](browsers.md): the same app in a page, compiled to
+  WebAssembly and drawn with WebGL 2.
 - [Migration](migration.md): element values, persistent handles, focus
   bindings and source migration.
 - [Performance](performance.md): measured frame costs and retained memory.

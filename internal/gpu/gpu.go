@@ -26,8 +26,6 @@
 package gpu
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"math"
 	"strings"
@@ -35,15 +33,6 @@ import (
 
 	"github.com/egoist/mygo/internal/scene"
 )
-
-// SourceSum returns the SHA-256, in hex, of a shader's source as the
-// repository holds it, with LF line endings, which shaders compiled ahead
-// of time record: the source matches them however it was checked out, as
-// with CRLF endings on Windows.
-func SourceSum(src string) string {
-	sum := sha256.Sum256([]byte(strings.ReplaceAll(src, "\r\n", "\n")))
-	return hex.EncodeToString(sum[:])
-}
 
 // GoBytes returns the Go declaration of a variable name holding b, as
 // code compiled ahead of time is generated.

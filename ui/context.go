@@ -145,8 +145,26 @@ func (c *context) reset(now time.Time, w, h float32) {
 // that a few rows entering and leaving a list do not allocate every frame.
 func (c *context) finish() {
 	c.chunks = trimArena(c.chunks, c.used, max(c.dirty, c.used))
-	c.spare = trimArena(c.spare, 0, c.spareDirty)
+	// While this frame built an exit transition, the spare chunks are the
+	// arena the next frame builds into: keep as many as this frame used,
+	// only cleared.
+	keep := 0
+	if c.rt.exitsBuilt {
+		keep = c.used
+	}
+	c.spare = clearArena(c.spare, c.spareDirty, keep)
 	c.dirty, c.spareDirty = c.used, 0
+}
+
+// clearArena drops what the first dirty elements reference, and keeps the
+// storage of keep elements and one chunk more.
+func clearArena(chunks [][]node, dirty, keep int) [][]node {
+	n := min(len(chunks), (keep+chunkSize-1)/chunkSize+1)
+	for ci := 0; ci < n && ci*chunkSize < dirty; ci++ {
+		clear(chunks[ci][:min(chunkSize, dirty-ci*chunkSize)])
+	}
+	clear(chunks[n:])
+	return chunks[:n]
 }
 
 func trimArena(chunks [][]node, used, dirty int) [][]node {
