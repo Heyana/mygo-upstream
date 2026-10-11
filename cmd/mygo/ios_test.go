@@ -30,7 +30,7 @@ func TestIOSBundleMetadata(t *testing.T) {
 
 func TestIOSProjectLinksHostedEntry(t *testing.T) {
 	p := iosProject(&Config{Identifier: "com.example.native"}, "15.0", "TEAMID")
-	for _, want := range []string{"-force_load", "$(PROJECT_DIR)/libmygo.a", "UIKit", "Metal", "CoreText", "AVFoundation", "Photos", "PhotosUI", "UniformTypeIdentifiers", "CoreLocation", "UserNotifications", `DEVELOPMENT_TEAM = "TEAMID"`, "Resources"} {
+	for _, want := range []string{"-force_load", "$(PROJECT_DIR)/libmygo.a", "UIKit", "Metal", "CoreText", "AVFoundation", "Speech", "Photos", "PhotosUI", "UniformTypeIdentifiers", "CoreLocation", "UserNotifications", `DEVELOPMENT_TEAM = "TEAMID"`, "Resources"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("iOS host is missing %q", want)
 		}
