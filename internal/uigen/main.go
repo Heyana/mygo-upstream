@@ -456,7 +456,7 @@ func generate(out *bytes.Buffer, fs *token.FileSet, fn *ast.FuncDecl) {
 		fmt.Fprintln(out, "_parts := _handle.resolve(); if _parts == nil {", zeroReturn(fs, fn.Type.Results), "}; _ctx := _parts.c; _ = _ctx")
 		rawRecv = "_parts."
 	}
-	if r == "" || r == "Router" || r == "Route" || r == "ListState" {
+	if r != "node" && r != "context" && publicPart(r) == "" {
 		frameParam := ""
 		if fn.Type.Params != nil {
 			for _, p := range fn.Type.Params.List {

@@ -54,6 +54,10 @@ type Conn struct {
 	// FrameSubmitted tells that a frame was committed for display. Backends
 	// with native presentation callbacks report their completion separately.
 	FrameSubmitted func()
+	// OnFirstFrame subscribes to the first frame actually committed for
+	// display. The returned function cancels the subscription. Both run on
+	// the main thread; native presentation is distinct from submission.
+	OnFirstFrame func(func()) func()
 	// ContentBackground reports the opaque root fill of a presented UI frame.
 	// The window may use it to match surrounding system chrome on mobile.
 	ContentBackground func(platform.Color)

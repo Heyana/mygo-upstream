@@ -23,6 +23,7 @@ type host interface {
 	// windows cover it.
 	occluded() bool
 	present(s *scene.Scene)
+	firstFramePresented() bool
 	requestFrame()
 	setCursor(Cursor)
 	setTextInput(t platform.TextInputState)

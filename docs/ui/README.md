@@ -88,6 +88,8 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   and values that ease to their targets.
 - [Transitions](transitions.md): elements that move, resize and recolor
   smoothly as the layout changes, and come and go.
+- [Startup](startup.md): a custom startup view, first-frame presentation,
+  application readiness and an accessible crossfade to content.
 - [Custom widgets](custom-widgets.md): the widgets without a look that every
   widget is built on, and widgets of your own.
 - [Windows with native UI](windows.md): window options, title bars drawn by

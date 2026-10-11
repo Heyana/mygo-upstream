@@ -1295,6 +1295,13 @@ control's pending request.
 See the [migration guide](ui/migration.md) for the breaking element API,
 `mygo migrate-ui`, and the Go type-aware lifetime checks in `mygo vet`.
 
+`ui.Startup` coordinates first-frame presentation with application readiness,
+then crossfades between two application-supplied UI builders. Its state is
+per window and keyed component, respects Reduce Motion, and keeps content
+inert until completion. `surface.Conn.OnFirstFrame` carries the window's
+existing presentation acknowledgment into the toolkit; platform backends
+only report presentation. Branding and data-loading policy stay in the app.
+
 A window with `WindowOptions.Content` shows a user interface MyGo draws
 itself instead of a web page. The layers stay as everywhere else: the
 toolkit (`ui`) is plain Go above the platform contract, a backend only

@@ -122,6 +122,28 @@ func (_handle *Router) View(c *Context, fn func(r *Route)) Element {
 	}()))
 }
 
+// View builds splash until startup is ready, then crossfades to content.
+// Both builders use ordinary UI components and inherit the current theme.
+// Content is inert until the transition completes, including its keyboard
+// shortcuts and accessibility actions. The returned box fills its parent.
+func (_handle *Startup) View(c *Context, splash func(), content func()) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	return wrapElement(_handle.coreView(_ctx, func() func() {
+		if splash == nil {
+			return nil
+		}
+		return func() { splash() }
+	}(), func() func() {
+		if content == nil {
+			return nil
+		}
+		return func() { content() }
+	}()))
+}
+
 // Panel builds fn in the panel of the collapsible while it is open, and as
 // it opens and closes, when the panel grows and shrinks with Progress,
 // clipping what fn built. It returns the column holding what fn builds,
