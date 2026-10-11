@@ -3,7 +3,7 @@ package ui
 import "time"
 
 // Startup shows an application-defined startup view until the first frame
-// has been presented and Ready is true, then crossfades to its content.
+// has been presented and Ready is true, then shows its content.
 // Configure it and change Ready on the UI thread; after changing Ready,
 // invalidate the window as for other view state. The transition is one-shot
 // and kept separately for each window and keyed component.
@@ -20,6 +20,9 @@ type Startup struct {
 	Ready bool
 	// Duration is the crossfade duration; zero uses 200ms.
 	Duration time.Duration
+	// SkipTransition switches directly to content when ready, without a
+	// timed crossfade. It still waits for first-frame presentation and Ready.
+	SkipTransition bool
 	// Ease defaults to EaseInOut. Reduce Motion always switches immediately,
 	// including when enabled in the middle of the transition.
 	Ease Easing
@@ -29,7 +32,8 @@ type startupState struct {
 	started, finished bool
 }
 
-// View builds splash until startup is ready, then crossfades to content.
+// View builds splash until startup is ready, then shows content, crossfading
+// unless SkipTransition is set.
 // Both builders use ordinary UI components and inherit the current theme.
 // Content is inert until the transition completes, including its keyboard
 // shortcuts and accessibility actions. The returned box fills its parent.
@@ -59,7 +63,7 @@ func (s *Startup) coreView(c *context, splash, content func()) *node {
 		if ease == nil {
 			ease = EaseInOut
 		}
-		if state.started && c.rt.preferences().ReduceMotion {
+		if state.started && (s.SkipTransition || c.rt.preferences().ReduceMotion) {
 			state.finished = true
 		} else {
 			opacity = stage.AnimateWith("startup", target, duration, ease)

@@ -122,7 +122,8 @@ func (_handle *Router) View(c *Context, fn func(r *Route)) Element {
 	}()))
 }
 
-// View builds splash until startup is ready, then crossfades to content.
+// View builds splash until startup is ready, then shows content, crossfading
+// unless SkipTransition is set.
 // Both builders use ordinary UI components and inherit the current theme.
 // Content is inert until the transition completes, including its keyboard
 // shortcuts and accessibility actions. The returned box fills its parent.

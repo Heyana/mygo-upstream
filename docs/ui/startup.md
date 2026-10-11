@@ -29,6 +29,11 @@ to `ui.EaseInOut`. System Reduce Motion switches immediately, even if it is
 enabled during a fade. Content is built when the transition begins and cannot
 receive pointer, keyboard or accessibility actions until it ends.
 
+Set `SkipTransition: true` to display content as soon as readiness and
+first-frame presentation are complete, without a timed crossfade. Startup
+has no minimum or maximum display duration: readiness controls how long the
+startup view remains, and `Duration` controls only the optional crossfade.
+
 The transition runs once per window and keyed component. Changing `Ready`
 back to false does not replay it. Give sibling startup components distinct
 `c.Key` values. Set the root background as for other views; colors inherit

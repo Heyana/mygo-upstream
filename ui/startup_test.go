@@ -8,8 +8,19 @@ import (
 )
 
 func TestStartupWaitsForNativePresentation(t *testing.T) {
+	for _, skip := range []bool{false, true} {
+		name := "crossfade"
+		if skip {
+			name = "direct"
+		}
+		t.Run(name, func(t *testing.T) { testStartupWaitsForNativePresentation(t, skip) })
+	}
+}
+
+func testStartupWaitsForNativePresentation(t *testing.T, skip bool) {
+	t.Helper()
 	h, _, frame := gpuHost(t, func() (gpuRenderer, error) { return &testGPU{}, nil })
-	startup := &Startup{Ready: true}
+	startup := &Startup{Ready: true, SkipTransition: skip}
 	var presented func()
 	subscribed, canceled, home := 0, 0, 0
 	h.conn.OnFirstFrame = func(fn func()) func() {
@@ -38,6 +49,31 @@ func TestStartupWaitsForNativePresentation(t *testing.T) {
 	presented()
 	if h.firstFrameShown {
 		t.Fatal("late presentation callback changed a detached window")
+	}
+}
+
+func TestStartupDirectHandoffWaitsOnlyForReadiness(t *testing.T) {
+	startup := &Startup{SkipTransition: true, Duration: time.Hour}
+	clicks := 0
+	tt, now := clockTester(func(c *context) {
+		startup.coreView(c, func() { coreText(c, "Launch") }, func() {
+			if coreButton(c, "Home").Clicked() {
+				clicks++
+			}
+		})
+	}, 200, 100)
+	*now = now.Add(2 * time.Hour)
+	tt.Frame()
+	if !tt.HasText("Launch") || tt.HasText("Home") {
+		t.Fatal("elapsed time bypassed readiness")
+	}
+	startup.Ready = true
+	tt.Frame() // No clock advance: the handoff must be immediate.
+	if tt.HasText("Launch") || !tt.HasText("Home") {
+		t.Fatal("readiness retained a timed transition")
+	}
+	if err := tt.Click("Home"); err != nil || clicks != 1 {
+		t.Fatalf("content was not immediately interactive: clicks=%d err=%v", clicks, err)
 	}
 }
 
