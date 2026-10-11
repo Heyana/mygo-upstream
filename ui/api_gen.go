@@ -178,8 +178,8 @@ func (_handle CollapsibleParts) Progress() float32 {
 }
 
 // Chosen returns the option the user chose in this frame, by a click or
-// Enter: ask it after Popup. It applies pending input to the controls built
-// so far, so the choice can be handled in the same build pass.
+// Enter: ask it after Popup or Inline. It applies pending input to the controls
+// built so far, so the choice can be handled in the same build pass.
 func (_handle ComboboxParts) Chosen() (string, bool) {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -203,6 +203,27 @@ func (_handle ComboboxParts) Filtering() bool {
 	return _parts.Filtering()
 }
 
+// Inline builds an always-visible options panel in the normal layout, as
+// below a search field in a command palette. Style panel and build its options
+// with Item. The first option is highlighted initially and after typing;
+// arrows, clicks and Chosen work as for Popup. Escape is left to the containing
+// dialog, and an empty panel stays visible so fn can show an empty-state message.
+// Call either Inline or Popup once per build, before asking Chosen.
+func (_handle ComboboxParts) Inline(fn func(panel Element)) Element {
+	_parts := _handle.resolve()
+	if _parts == nil {
+		return Element{}
+	}
+	_ctx := _parts.c
+	_ = _ctx
+	return wrapElement(_parts.Inline(func() func(panel *node) {
+		if fn == nil {
+			return nil
+		}
+		return func(panel *node) { fn(wrapElement(panel)) }
+	}()))
+}
+
 // Item creates an option: a row that is Highlighted when the pointer or
 // the arrows are on it, and that chooses value when clicked. The option
 // the highlight moves to scrolls into view, once, so that the wheel
@@ -217,7 +238,7 @@ func (_handle ComboboxParts) Item(value string) Element {
 	return wrapElement(_parts.Item(value))
 }
 
-// Open reports whether the popup shows.
+// Open reports whether the options panel shows.
 func (_handle ComboboxParts) Open() bool {
 	_parts := _handle.resolve()
 	if _parts == nil {
@@ -246,7 +267,7 @@ func (_handle ComboboxParts) Popup(fn func(panel Element)) Element {
 	}()))
 }
 
-// SetOpen opens or closes the popup.
+// SetOpen opens or closes the popup. Inline always shows its panel.
 func (_handle ComboboxParts) SetOpen(o bool) {
 	_parts := _handle.resolve()
 	if _parts == nil {

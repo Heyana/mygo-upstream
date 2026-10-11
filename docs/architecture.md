@@ -1742,7 +1742,11 @@ either.
   move the focus (`flagKeepFocus`), and the popup closes as the input loses
   it. The option the arrows are on is the input's active descendant,
   which has the focus in the accessibility tree, as a list's chosen row
-  does, and reads as which of how many it is. Fields around an input (a
+  does, and reads as which of how many it is. `ComboboxParts.Inline` builds
+  the same options in normal layout for a search panel: it stays visible,
+  highlights the first option initially and after typing, and leaves Escape
+  to its containing dialog. Both modes scroll a highlighted option into view
+  only as the highlight changes. Fields around an input (a
   combobox's, a search field's, a token field's) name it with their
   Label (`nameFrom`). Backends treat combo boxes as text fields (macOS
   `AXComboBox`, ATK combo box with AtkEditableText, UIA ComboBox with
