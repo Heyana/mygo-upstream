@@ -70,7 +70,7 @@ func buildDMG(c *Config, app, dir, goarch string, opts buildOptions) (_ string, 
 		}
 	}
 	rw := filepath.Join(work, "rw.dmg")
-	if err := command("hdiutil", hdiutilCreateArgs(c.MacOS.DMGTitle, src, rw)...); err != nil {
+	if err := hdiutilRetrying(hdiutilCreateArgs(c.MacOS.DMGTitle, src, rw)...); err != nil {
 		return "", err
 	}
 
@@ -78,13 +78,13 @@ func buildDMG(c *Config, app, dir, goarch string, opts buildOptions) (_ string, 
 	if err := os.Mkdir(mnt, 0o755); err != nil {
 		return "", err
 	}
-	if err := command("hdiutil", "attach", "-quiet", "-readwrite", "-noverify", "-noautoopen", "-nobrowse", "-mountpoint", mnt, rw); err != nil {
+	if err := command("hdiutil", "attach", "-readwrite", "-noverify", "-noautoopen", "-nobrowse", "-mountpoint", mnt, rw); err != nil {
 		return "", err
 	}
 	attached := true
 	defer func() {
 		if attached {
-			_ = exec.Command("hdiutil", "detach", "-quiet", "-force", mnt).Run()
+			_ = exec.Command("hdiutil", "detach", "-force", mnt).Run()
 		}
 	}()
 	if hasIcon {
@@ -103,7 +103,7 @@ func buildDMG(c *Config, app, dir, goarch string, opts buildOptions) (_ string, 
 	// LZMA gives the smallest images; it needs macOS 10.15, below the
 	// minimum MyGo supports.
 	dmg := filepath.Join(dir, file)
-	if err := command("hdiutil", "convert", "-quiet", rw, "-format", "ULMO", "-ov", "-o", dmg); err != nil {
+	if err := command("hdiutil", "convert", rw, "-format", "ULMO", "-ov", "-o", dmg); err != nil {
 		return "", err
 	}
 	if opts.sign != "-" {
@@ -126,16 +126,39 @@ func buildDMG(c *Config, app, dir, goarch string, opts buildOptions) (_ string, 
 }
 
 // hdiutilCreateArgs creates a writable HFS+ image of src, as large as its
-// contents need.
+// contents need. hdiutil runs without -quiet, which would leave out of the
+// error why it failed.
 func hdiutilCreateArgs(volume, src, out string) []string {
 	return []string{
-		"create", "-quiet", "-ov",
+		"create", "-ov",
 		"-volname", volume,
 		"-srcfolder", src,
 		"-fs", "HFS+", "-fsargs", "-c c=64,a=16,e=16",
 		"-format", "UDRW",
 		out,
 	}
+}
+
+// hdiutilRetrying runs hdiutil, again while it fails with "Resource busy",
+// which "hdiutil create" reports with exit status 1 when a service such as
+// Spotlight or an antivirus holds an image or a file it reads: it waits 2,
+// 4, 8 then 16 seconds before trying again, as create-dmg does.
+func hdiutilRetrying(args ...string) error {
+	var err error
+	for i := range 5 {
+		if err = command("hdiutil", args...); err == nil || !hdiutilBusy(err) {
+			return err
+		}
+		if i < 4 {
+			time.Sleep(time.Duration(2<<i) * time.Second)
+		}
+	}
+	return err
+}
+
+// hdiutilBusy reports whether hdiutil failed because a resource was busy.
+func hdiutilBusy(err error) bool {
+	return strings.Contains(err.Error(), "Resource busy")
 }
 
 // setFinderFlags sets the Finder flags of a file or folder, which are
@@ -153,9 +176,9 @@ func setFinderFlags(path string, flags uint16) error {
 func detach(mnt string) error {
 	var err error
 	for i := range 10 {
-		args := []string{"detach", "-quiet", mnt}
+		args := []string{"detach", mnt}
 		if i >= 4 {
-			args = []string{"detach", "-quiet", "-force", mnt}
+			args = []string{"detach", "-force", mnt}
 		}
 		if err = command("hdiutil", args...); err == nil {
 			return nil

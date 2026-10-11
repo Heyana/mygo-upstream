@@ -146,14 +146,22 @@ func (w *window) createWebView() {
 		testFailWebViews--
 	}
 	hr := withHandler(func(hr, controller uintptr) {
+		// A web view in a window of native UI gets a composition
+		// controller, whose controller closes it.
+		closeController := func() {
+			if c := queryInterface(controller, &iidICoreWebView2Controller); c != 0 {
+				comCall(c, ctlClose)
+				release(c)
+			}
+		}
 		if fail && controller != 0 { // TestFailWebViews
-			comCall(controller, ctlClose)
+			closeController()
 			hr, controller = eFail, 0
 		}
 		// Closing the window aborts the creation (E_ABORT).
-		if w.closed || w.destroying {
+		if w.closed || w.destroying || w.host != nil && w.host.closed {
 			if controller != 0 {
-				comCall(controller, ctlClose)
+				closeController()
 			}
 			return
 		}
@@ -162,8 +170,16 @@ func (w *window) createWebView() {
 			return
 		}
 		addRef(controller)
+		if w.host != nil {
+			controller = w.setUpEmbedded(controller)
+		}
 		w.setUp(controller)
-	}, func(h uintptr) uintptr { return comCall(w.b.env, envCreateController, w.hwnd, h) })
+	}, func(h uintptr) uintptr {
+		if w.host != nil {
+			return w.createEmbedded(h)
+		}
+		return comCall(w.b.env, envCreateController, w.hwnd, h)
+	})
 	if failed(hr) {
 		w.creationFailed(hr)
 	}
@@ -179,7 +195,11 @@ func (w *window) creationFailed(hr uintptr) {
 		return
 	}
 	log.Printf("%v; trying again", err)
-	procSetTimer.Call(w.hwnd, timerWebView, uintptr(backoff(w.webViewFails-1)/time.Millisecond), 0)
+	hwnd := w.hwnd
+	if w.host != nil && w.host.surface != nil {
+		hwnd = w.host.surface.hwnd // which asks again for its web views
+	}
+	procSetTimer.Call(hwnd, timerWebView, uintptr(backoff(w.webViewFails-1)/time.Millisecond), 0)
 }
 
 func (w *window) setUp(controller uintptr) {
@@ -269,8 +289,15 @@ func (w *window) setUp(controller uintptr) {
 		return comCall(controller, ctlAddAcceleratorKeyPressed, h, tok)
 	})
 
-	comCall(controller, ctlPutIsVisible, 1)
-	w.resizeWebView()
+	if w.host != nil {
+		w.placeEmbedded()
+		if l := w.host.surface.layer; l != nil {
+			l.commit()
+		}
+	} else {
+		comCall(controller, ctlPutIsVisible, 1)
+		w.resizeWebView()
+	}
 	if w.caption != nil {
 		w.caption.layout() // above the webview's window
 	}
@@ -522,6 +549,7 @@ func (w *window) newWindowRequested(_, args uintptr) {
 // Accelerator keys reach the webview, not the window: run the menu items
 // they belong to from here.
 func (w *window) acceleratorKeyPressed(_, args uintptr) {
+	w = w.top() // a web view's keys are its window's
 	var kind int32
 	comCall(args, accelGetKeyEventKind, uintptr(unsafe.Pointer(&kind)))
 	if kind != 0 && kind != 2 { // KEY_DOWN, SYSTEM_KEY_DOWN

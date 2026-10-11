@@ -18,8 +18,8 @@ import (
 
 // Scene returns a 320×600 scene with fills, borders of every width and
 // dashed, gradients mixed in sRGB and Oklab, stripes, shadows, blurred or
-// not, and cut by the boxes casting them, inner shadows, nested rounded
-// clips, glyphs from both atlases and subpixel ones, plain and in
+// not, and cut by the boxes casting them, inner shadows, a hole, nested
+// rounded clips, glyphs from both atlases and subpixel ones, plain and in
 // gradients, with Direct2D's gamma and contrast, images, in color and in
 // gray, and effects, reading their backdrop blurred at each size or not,
 // over each other, clipped and at the frame's edge, or reading none.
@@ -139,6 +139,15 @@ func Scene() *scene.Scene {
 	add(scene.Op{Kind: scene.OpFill, Rect: card, Radii: r4(8), Color: scene.Color{R: 37, G: 99, B: 235, A: 90}})
 	add(scene.Op{Kind: scene.OpShadow, Rect: scene.Rect{X: 218, Y: 334, W: 84, H: 32}, Radii: r4(16), Color: red, Blur: 6,
 		Cast: scene.Rect{X: 220, Y: 334, W: 80, H: 28}, CastRadii: r4(14)})
+	// A hole through them, rounded and cut by a rounded clip, under a
+	// translucent fill and its shadow, as a web view under a popover.
+	add(scene.Op{Kind: scene.OpPushClip, Rect: scene.Rect{X: 210, Y: 322, W: 104, H: 56}, Radii: r4(12)})
+	add(scene.Op{Kind: scene.OpHole, Rect: scene.Rect{X: 246.5, Y: 326.25, W: 80, H: 40}, Radii: r4(10)})
+	add(scene.Op{Kind: scene.OpShadow, Rect: scene.Rect{X: 270, Y: 344, W: 34, H: 30}, Radii: r4(6), Color: scene.Color{A: 100}, Blur: 8})
+	add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 270, Y: 340, W: 34, H: 30}, Radii: r4(6), Color: scene.Color{R: 37, G: 99, B: 235, A: 140}})
+	add(scene.Op{Kind: scene.OpPopClip})
+	// A hole at half opacity, as a web view in a page fading in.
+	add(scene.Op{Kind: scene.OpHole, Rect: scene.Rect{X: 112.5, Y: 354.5, W: 60, H: 20}, Radii: r4(6), Opacity: 0.5})
 
 	// Subpixel glyphs, dark on white and light on dark, half transparent,
 	// in a gradient, and clipped; thin mask glyphs, dark and light.

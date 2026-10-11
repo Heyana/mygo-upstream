@@ -23,8 +23,18 @@ type Painter struct {
 	// window, or that of an element around them, as a pane beside a
 	// sidebar over the window's material. under holds the boxes of the
 	// elements painting with an opaque background around the one painting.
+	// holes are those painted for web views (WebView) since the frame
+	// began, under which nothing is opaque.
 	opaque bool
-	under  []Rect
+	under  []opaqueBox
+	holes  []Rect
+}
+
+// opaqueBox is the box of an element painting an opaque background, and
+// how many holes were painted before it, which it covers.
+type opaqueBox struct {
+	r     Rect
+	holes int
 }
 
 // continuousCorners curves rounded corners as Apple does, on macOS, where
@@ -47,16 +57,16 @@ func (rt *engine) paint(root *node, w, h, scale float32) {
 	under := rt.under[:0]
 	if opaque {
 		// Under all the window paints, as what it drags.
-		under = append(under, Rect{0, 0, w, h})
+		under = append(under, opaqueBox{r: Rect{0, 0, w, h}})
 	}
-	rt.painter = Painter{rt: rt, s: s, scale: scale, opacity: 1, clip: Rect{0, 0, w, h}, opaque: opaque, under: under}
+	rt.painter = Painter{rt: rt, s: s, scale: scale, opacity: 1, clip: Rect{0, 0, w, h}, opaque: opaque, under: under, holes: rt.holes[:0]}
 	p := &rt.painter
 	p.element(root)
 	if rt.insp.open {
 		rt.insp.paintHighlight(rt, p, h)
 	}
 	rt.paintDrag(p, w, h)
-	rt.under = p.under[:0] // kept for the next frame's
+	rt.under, rt.holes = p.under[:0], p.holes[:0] // kept for the next frame's
 }
 
 // Now returns the time of the frame being painted, which drawings that
@@ -131,7 +141,7 @@ func (p *Painter) element(e *node) {
 	box := Rect{e.x, e.y, e.w, e.h}
 	savedOpaque, under := p.opaque, len(p.under)
 	if e.fill == fillColor && e.bg.A == 255 && p.opacity >= 1 {
-		p.under = append(p.under, box)
+		p.under = append(p.under, opaqueBox{box, len(p.holes)})
 	}
 	// What the element paints lands on an opaque background when all of
 	// it that shows does.
@@ -155,6 +165,10 @@ func (p *Painter) element(e *node) {
 			}
 		}
 		p.background(e, box, !borderOver)
+		if e.webView != nil {
+			p.hole(e)
+		}
+		// Over a web view's page, as over a background.
 		for _, sh := range e.shadows {
 			if sh.inset {
 				p.insetShadow(box, e.radius, e.border, sh)
@@ -245,8 +259,14 @@ func (p *Painter) covered(r Rect) bool {
 	if r.W <= 0 || r.H <= 0 {
 		return true
 	}
-	for _, b := range slices.Backward(p.under) {
-		if r.X >= b.X && r.Y >= b.Y && r.X+r.W <= b.X+b.W && r.Y+r.H <= b.Y+b.H {
+	for _, u := range slices.Backward(p.under) {
+		if b := u.r; r.X >= b.X && r.Y >= b.Y && r.X+r.W <= b.X+b.W && r.Y+r.H <= b.Y+b.H {
+			// Unless the web view of a hole painted since shows there.
+			for _, h := range p.holes[u.holes:] {
+				if i := intersect(r, h); i.W > 0 && i.H > 0 {
+					return false
+				}
+			}
 			return true
 		}
 	}

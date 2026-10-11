@@ -76,7 +76,9 @@ reported to the caller like an error.
 A method whose first parameter is a `context.Context` gets one that is
 canceled when the calling page navigates away or its window closes: pass it
 on to slow work. `mygo.CallerWindow(ctx)` returns the window that called,
-for example to attach a dialog to it:
+for example to attach a dialog to it, and `mygo.CallerPage(ctx)` the page,
+which tells apart the pages of the web views of a window of native UI
+([Web view](ui/web-view.md)):
 
 ```go
 // Export asks where to save the notes and writes them there. It returns the

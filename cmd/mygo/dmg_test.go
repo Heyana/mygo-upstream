@@ -90,8 +90,14 @@ func TestPackagingArgs(t *testing.T) {
 		t.Errorf("development builds need no timestamp: %q", got)
 	}
 	args := hdiutilCreateArgs("My App", "src", "rw.dmg")
-	if slices.Contains(args, "-size") {
+	if slices.Contains(args, "-size") || slices.Contains(args, "-quiet") {
 		t.Errorf("hdiutil create: %q", args)
+	}
+	if !hdiutilBusy(errors.New("hdiutil create -ov ...: exit status 1\nhdiutil: create failed - Resource busy")) {
+		t.Error(`"Resource busy" is retried`)
+	}
+	if hdiutilBusy(errors.New("hdiutil create -ov ...: exit status 1\nhdiutil: create failed - No space left on device")) {
+		t.Error("only busy resources are retried")
 	}
 }
 
