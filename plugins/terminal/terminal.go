@@ -661,6 +661,18 @@ func (t *Terminal) SelectionAnchor() (ui.Rect, bool) {
 	return t.selectionAnchor, t.selectionAnchor.H > 0
 }
 
+// ClearSelection removes the local selection without sending input to the
+// program or changing the clipboard, viewport or terminal contents.
+func (t *Terminal) ClearSelection() {
+	t.mu.Lock()
+	if t.term != nil {
+		t.term.SetSelection(nil)
+	}
+	t.selectionAnchor = ui.Rect{}
+	t.mu.Unlock()
+	t.redraw()
+}
+
 // SelectAll selects the screen and its available scrollback.
 func (t *Terminal) SelectAll() {
 	t.mu.Lock()

@@ -171,7 +171,9 @@ Search is literal and ASCII case-insensitive, including scrollback. It scans
 incrementally with bounded work per frame; navigation waits for the scan.
 
 `SelectedText` returns the selection without touching the clipboard, and
-`SelectAll` selects available output. `SelectionAnchor` returns a view-relative
+`SelectAll` selects available output. `ClearSelection` removes the local
+highlight without sending input to the program or changing the clipboard,
+viewport or output. `SelectionAnchor` returns a view-relative
 rectangle after a pointer gesture, for an app's selection actions; it is
 unavailable during a drag. Long press starts touch selection, and dragging
 within 8 DIPs of the viewport edge scrolls through history.
