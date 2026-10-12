@@ -24,6 +24,9 @@
         没有它，每次旋转都重建 Activity（surfaceDestroyed→surfaceCreated），
         Go 侧虽然也能恢复（真机实测过），但会白白丢掉 EGL context 与渲染线程。
     -->
+    <!-- T34: Android 13+ 发通知需要该运行时权限（缺它时 notify() 会被系统接受并丢弃） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:label="mygo"
@@ -34,12 +37,18 @@
             android:name=".MygoActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- T34: 通知被点击时的回传接收方（org.mygo.MygoPlatform.NotificationReceiver） -->
+        <receiver
+            android:name=".MygoPlatform$NotificationReceiver"
+            android:exported="false" />
 
     </application>
 

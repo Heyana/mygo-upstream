@@ -89,13 +89,16 @@ func (s *Surface) RefreshRate() float64 { return 0 }
 // SetCursor does nothing: touch devices show no pointer over the surface.
 func (s *Surface) SetCursor(platform.Cursor) {}
 
-// SetTextInput does nothing: without an input method wired through JNI
-// there is nothing to tell it where the caret is.
-func (s *Surface) SetTextInput(platform.TextInputState) {}
+// SetTextInput hands the surface's text-input state to the Android IME state
+// machine, which is what answers an input method's queries and raises the
+// soft keyboard (see textinput.go).
+func (s *Surface) SetTextInput(t platform.TextInputState) {
+	theIme.SetTextInput(t)
+}
 
-// UpdateAccessibility does nothing: the accessibility bridge is not wired
-// on Android yet.
-func (s *Surface) UpdateAccessibility(*platform.AccessTree) {}
+// UpdateAccessibility pushes the tree to the Java node provider, which is what
+// TalkBack reads (see platform.go and MygoPlatform.kt).
+func (s *Surface) UpdateAccessibility(t *platform.AccessTree) { s.b.UpdateAccessibility(t) }
 
 // StartDataDrag does nothing: native drag-and-drop does not exist here.
 func (s *Surface) StartDataDrag(platform.DragRequest) {}

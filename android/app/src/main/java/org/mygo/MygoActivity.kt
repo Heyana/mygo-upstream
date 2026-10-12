@@ -31,6 +31,9 @@ class MygoActivity : Activity() {
 
         // 让 View 拿到焦点，否则 onKeyDown/onKeyUp 不会派发到它。
         view.grabInputFocus()
+
+        // 平台能力（剪贴板/URL/通知/无障碍）的 Java 侧握手；必须在任何平台能力被使用前调用。
+        MygoPlatform.install(this, view)
     }
 
     override fun onResume() {

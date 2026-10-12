@@ -1,4 +1,4 @@
-//go:build (ios && !cgo) || android || (!(windows && (amd64 || arm64)) && !darwin && !(linux && (amd64 || arm64)) && !js)
+//go:build (android && !cgo) || ios || (!(windows && (amd64 || arm64)) && !darwin && !(linux && (amd64 || arm64)) && !js)
 
 package text
 
