@@ -29,7 +29,7 @@ import (
 //
 // Every method here calls into the client, whose callbacks the contract
 // requires to run on the backend's main (pump) goroutine. The JNI entry
-// points in internal/android/jni_textinput.go therefore run each call on the
+// points in android/jni/jni_textinput.go therefore run each call on the
 // pump and wait for it, rather than calling the client on the Java thread
 // that made the request.
 type Ime struct {

@@ -46,7 +46,7 @@
 // surrogate pair as six bytes and would shift every offset after an emoji.
 // The characters are converted here instead, so an offset Java reported and an
 // offset Go computes refer to the same unit.
-package main
+package jni
 
 /*
 #include <jni.h>

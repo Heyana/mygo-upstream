@@ -21,6 +21,11 @@ type Surface struct {
 	b   *Backend
 	egl *eglState
 
+	// present holds the GL objects that turn a frame drawn in memory into what
+	// the display shows; they belong to the EGL context, so they outlive every
+	// surface change (see glpresent.go).
+	present presenter
+
 	// window is the ANativeWindow* from ANativeWindow_fromSurface, which
 	// the backend owns and releases after the EGLSurface is gone.
 	window unsafe.Pointer
@@ -59,11 +64,10 @@ func (s *Surface) Size() (width, height, scale float64) {
 // PresentPixels shows a frame drawn in memory: premultiplied BGRA rows of
 // stride bytes, width×height device pixels.
 //
-// The skeleton does not upload pix yet: it clears the surface and swaps,
-// which is what proves the EGL surface is alive and a frame reaches the
-// display. Uploading the rows — a texture and a blit, the way the Linux
-// surface does — is the next step and belongs here, where the rows can
-// become a GL object the EGL context keeps current.
+// The rows become a texture the presenter draws (see glpresent.go), so the
+// frame the ui package rendered in memory is what the display shows. A caller
+// that hands over no usable frame gets the placeholder fill instead, which
+// keeps the surface from showing whatever the driver last left in the buffer.
 func (s *Surface) PresentPixels(pix []byte, stride, width, height int) {
 	if s.egl == nil || !s.egl.makeCurrent() {
 		return
@@ -71,9 +75,11 @@ func (s *Surface) PresentPixels(pix []byte, stride, width, height int) {
 	if width > 0 && height > 0 {
 		s.egl.viewport(width, height)
 	}
-	// An opaque fill: the surface is opaque at this stage, so the alpha is
-	// 1 and the color is only a placeholder for a real frame.
-	s.egl.clear(0.11, 0.12, 0.16, 1)
+	if !s.present.draw(pix, stride, width, height) {
+		// An opaque fill: the surface is opaque at this stage, so the alpha is
+		// 1 and the color is only a placeholder for a real frame.
+		s.egl.clear(0.11, 0.12, 0.16, 1)
+	}
 	s.egl.swap()
 }
 

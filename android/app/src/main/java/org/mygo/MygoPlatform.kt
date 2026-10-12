@@ -47,7 +47,7 @@ import org.json.JSONObject
  * · **Go → Java**：下面那些**普通方法**（readClipboardText / openExternalUrl /
  *   postNotification / setAccessibilityTree ...）。Go 侧用 JNI GetMethodID 按
  *   **方法名 + 签名**取到它们再调用，名字和签名逐字写在
- *   `internal/android/jni_platform.go` 的 `mygo_platform_attach` 表里；
+ *   `android/jni/jni_platform.go` 的 `mygo_platform_attach` 表里；
  *   两边必须一起改。**这些方法必须是 public**：JNI 的 GetMethodID 对 private
  *   成员在各家 ART 上行为不保证，public 是最省事的正确做法。
  *
@@ -946,7 +946,7 @@ object MygoPlatform {
         "android.permission.POST_NOTIFICATIONS"
 
     // ── Java → Go：3 个 external（JNI 符号 Java_org_mygo_MygoPlatform_*）──
-    // 名字/参数/返回值与 internal/android/jni_platform.go 的 //export **逐字**一致，
+    // 名字/参数/返回值与 android/jni/jni_platform.go 的 //export **逐字**一致，
     // 改一个就两边一起改（javap 是核对手段，见产出）。
 
     /** 记下 JavaVM 与 MygoPlatform 对象，让 Go 侧可以回调本文件的普通方法。 */

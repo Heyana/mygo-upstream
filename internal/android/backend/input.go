@@ -9,7 +9,7 @@
 //
 // The other two halves do nothing this file cannot do itself:
 //
-//	internal/android/jni_input.go  decodes Java's arrays into the types
+//	android/jni/jni_input.go  decodes Java's arrays into the types
 //	                               below and hands them to the Backend;
 //	android/.../MygoInput.kt       reads a MotionEvent's pointers and a
 //	                               KeyEvent's fields into those arrays.

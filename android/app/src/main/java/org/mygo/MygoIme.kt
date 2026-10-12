@@ -25,7 +25,7 @@ import android.view.inputmethod.InputMethodManager
  * 两个方向（谁调用谁）
  * ============================================================================
  * · Java → Go（编辑与查询，同步）：系统输入法调 [MygoImeConnection] 的方法，
- *   后者调本对象的 native 方法，Go 侧（internal/android/jni_textinput.go）把调用
+ *   后者调本对象的 native 方法，Go 侧（android/jni/jni_textinput.go）把调用
  *   投到后端的 pump goroutine 上并**等**它（回调必须在 pump 线程上跑），拿到结果
  *   再返回。因此 `getTextBeforeCursor` 这类方法必须**同步**返回。
  * · Go → Java（唤起/收起键盘）：Go 侧的可编辑元素拿到/失去键盘时，从它的 pump

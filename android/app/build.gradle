@@ -68,3 +68,29 @@ android {
         buildConfig false
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// nativeLibName —— 这个宿主装的是哪个 app 的 Go 库
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 这个工程不只是 "mygo 自己的 demo 宿主"：任何用 mygo 写原生 UI 的 app 都可以把
+// 自己的 c-shared 库放进 app/src/main/jniLibs/<abi>/，然后把库名告诉构建。app 的
+// .so 必须自带 JNI 入口（见 android/jni），因为 c-shared 的 main 不会被调用，
+// 而 app 启动自己只能靠包的 init。
+//
+//   ./gradlew :app:assembleDebug -PnativeLibName=lab     → 装 liblab.so
+//
+// 不给参数时是 "mygo"，也就是仓库里这个宿主自己的库。
+//
+// ⚠️ Java 侧不能按构建参数切库名：native 方法所在类的包名（org.mygo）是 JNI 符号
+//    的一部分，见 README「库名」。所以这个参数只在这里做**校验**，用来在参数与
+//    Native 类不符时早点失败，而不是等到运行时 UnsatisfiedLinkError。
+def nativeLibName = (findProperty('nativeLibName') ?: 'mygo')
+def nativeJavaLibName = 'mygo' // Native.java 的 System.loadLibrary 必须逐字用它
+if (nativeLibName != nativeJavaLibName) {
+    throw new GradleException(
+        "nativeLibName=${nativeLibName} 与宿主 Java 侧的库名 '${nativeJavaLibName}' 不一致。\n" +
+        "Java 的 native 方法写在 org.mygo 下，JNI 符号是 Java_org_mygo_*，所以库名不能从\n" +
+        "构建参数改 —— 改库名意味着换一个 Java 契约类。要用别的库名，请改\n" +
+        "app/src/main/java/org/mygo/Native.java 的 System.loadLibrary 与包名。")
+}

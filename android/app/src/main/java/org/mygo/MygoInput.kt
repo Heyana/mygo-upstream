@@ -19,7 +19,7 @@ import android.view.MotionEvent
  *   MygoInput  —— 整事件转发（本波新增，多指由此可见）
  *
  * 转发方向是一件事一个入口：MygoView 把触摸/按键交给本类，Go 侧
- * internal/android/jni_input.go 把这些 native 方法解码成普通 Go 值，
+ * android/jni/jni_input.go 把这些 native 方法解码成普通 Go 值，
  * internal/android/backend/input.go 再把它们映射成 platform.SurfaceEvent /
  * platform.Key —— 那一层是**平台无关纯逻辑**，在桌面上用
  * `CGO_ENABLED=0 go test ./internal/android/backend/` 就能跑。
