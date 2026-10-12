@@ -88,17 +88,43 @@ type Backend struct {
 	// surface is the drawing surface of the Activity's window; it exists
 	// from the first surfaceCreated until the backend quits.
 	surface *Surface
+	// win is the app's window, once App.Run's NewWindow has made it. The
+	// backend owns it because the surface events that drive it arrive here.
+	win *window
+	// frameQueued coalesces frame requests: a request made while one is
+	// already queued is the same frame (see frame.go).
+	frameQueued atomic.Bool
 }
 
-// New creates the Android backend.
+// New returns the Android backend, creating it on first use.
+//
+// 🔴 It is a process-wide singleton, not a factory, and that is the whole
+// point: an Android process has one Activity and one surface, and two callers
+// must be the same object. They are libmygo's JNI entry points (the host's
+// callbacks: surface, touch, keys, IME) and package mygo's own backend()
+// (the app: windows, events, App.Run). With one Backend each, the pump's
+// thread and the surface live in the instance the host fills, while the app
+// talks to an empty one — the app never sees a frame and App.Run refuses
+// because IsMainThread answers false for a pump that instance never ran.
+//
+// Every other backend may be a factory: a desktop process can hold several
+// windows and tests want fresh state. Android has neither.
 func New() *Backend {
-	return &Backend{
-		Backend: unsupported.New(),
-		tasks:   make(chan func(), 64),
-		quit:    make(chan struct{}),
-		wake:    make(chan struct{}, 1),
-	}
+	once.Do(func() {
+		the = &Backend{
+			Backend: unsupported.New(),
+			tasks:   make(chan func(), 64),
+			quit:    make(chan struct{}),
+			wake:    make(chan struct{}, 1),
+		}
+	})
+	return the
 }
+
+var (
+	once sync.Once
+	the  *Backend
+)
 
 // Name identifies the backend.
 func (b *Backend) Name() string { return "android/egl" }
@@ -115,7 +141,25 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	b.mu.Lock()
 	b.h = h
 	b.mu.Unlock()
-	b.threadID.Store(int64(syscall.Gettid()))
+	// 🔴 The thread to remember depends on who got here first, and getting it
+	// wrong deadlocks the app instead of failing loudly.
+	//
+	// The desktop model, which the comment below used to describe alone: there
+	// is no pump yet, mygo calls Init on the main goroutine, and that same
+	// goroutine goes on to call Run — so recording the caller is what makes
+	// IsMainThread true before the pump's first iteration.
+	//
+	// Android's order is the other one. Java drives the library from the first
+	// surface callback, so the pump is already up and has recorded the thread
+	// every backend call runs on. Overwriting it with the caller here (an
+	// app's own goroutine, see android/jni.Start) makes IsMainThread false for
+	// the pump — and then AppHandler.Ready, which the pump fires, runs the
+	// app's WhenReady callback on the pump; NewWindow there sees "not the main
+	// thread" and waits in waitReady for a ready that is being delivered right
+	// now. The app hangs with its first frame never asked for.
+	if !b.running.Load() {
+		b.threadID.Store(int64(syscall.Gettid()))
+	}
 	// A pump may already have started, when Java drove the library before
 	// mygo's App.Run (see Post): let it fire Ready now that there is a
 	// handler to receive it.
@@ -137,13 +181,30 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 // backend through the //export functions, whose first Post starts the pump
 // itself. When mygo's App.Run is used instead, it calls Init and then Run,
 // and Run is the pump on the main goroutine.
+// Run blocks until the app quits, as platform.Backend asks — but on Android
+// the loop it blocks on is the pump's, not one of its own.
+//
+// 🔴 Run must not run the pump itself, and this is the trap it avoids: mygo
+// calls Run on the main thread, which on Android is the pump (see
+// IsMainThread), so an App.Run that looped there would hold the one goroutine
+// every backend call has to run on. Frames are drawn from SurfaceEvent
+// (Event), and the input method, the clipboard and every other platform call
+// is queued the same way — with Run looping on the pump, none of them run
+// again, the app draws no frame, and an InputConnection request goes
+// unanswered until its timeout. The symptom is a live, focused, black app
+// whose log shows the host's callbacks and nothing else.
+//
+// So Run only makes sure the pump is up — it is already, started by the first
+// JNI call — and then waits for it to quit. AppHandler.Ready has fired by
+// then (the pump fires it once a handler is set), which is when the app opens
+// its window, and the frame that follows is drawn on the pump like the rest.
 func (b *Backend) Run() error {
-	if !b.started.CompareAndSwap(false, true) {
-		// A pump already runs (Start, from Post). Wait with it.
-		<-b.quit
-		return nil
+	if b.started.CompareAndSwap(false, true) {
+		// Nothing has driven the library yet: the pump is ours to start.
+		go b.pump()
 	}
-	return b.pump()
+	<-b.quit
+	return nil
 }
 
 // pump is the single goroutine every backend call runs on. It is locked to
@@ -392,15 +453,35 @@ func (b *Backend) surfaceDestroyed() {
 
 // touch (pump) is where a touch would become a platform.SurfaceEvent once
 // package ui is wired; it is a no-op stub until then.
+// touch (pump) is the single-pointer path: Native.nativeOnTouch, which the
+// app's view used before MygoView forwarded whole events through MygoInput.
+// Both are kept working: a host that calls the old entry still moves things.
+//
+// It is the only pointer in its event, and its x and y are in view pixels —
+// see TouchBatch for the batch path and input.go for what the numbers mean.
 func (b *Backend) touch(action int, x, y float32, eventTimeMs int64) {
-	_, _, _, _ = action, x, y, eventTimeMs
+	TouchBatch(TouchInput{
+		Action:      action,
+		ActionIndex: 0,
+		EventTimeMs: eventTimeMs,
+		Pointers:    []Pointer{{ID: 0, X: x, Y: y}},
+	})
 }
 
 // key (pump) is where a key would become a platform.SurfaceEvent once
 // package ui is wired; it is a no-op stub until then.
+// key (pump) is the single-key path, nativeOnKey: the same relationship to
+// the key path MygoView forwards (MygoInput.onKeyEvent → KeyBatch) that touch
+// has to TouchBatch.
 func (b *Backend) key(keyCode, action, metaState int) {
-	_, _, _ = keyCode, action, metaState
+	KeyBatch(KeyEventInput{KeyCode: keyCode, Action: action, MetaState: metaState})
 }
 
 // Backend must satisfy the platform contract.
 var _ platform.Backend = (*Backend)(nil)
+
+// StartedForLog and RunningForLog expose the pump's two flags, for the start
+// diagnostics in android/jni. They are diagnostics, not API: whether the pump
+// is up decides whether an app's startup may run.
+func (b *Backend) StartedForLog() bool { return b.started.Load() }
+func (b *Backend) RunningForLog() bool { return b.running.Load() }

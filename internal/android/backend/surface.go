@@ -76,17 +76,21 @@ func (s *Surface) PresentPixels(pix []byte, stride, width, height int) {
 		s.egl.viewport(width, height)
 	}
 	if !s.present.draw(pix, stride, width, height) {
-		// An opaque fill: the surface is opaque at this stage, so the alpha is
-		// 1 and the color is only a placeholder for a real frame.
-		s.egl.clear(0.11, 0.12, 0.16, 1)
+		// No frame to show: the app has not drawn one, or has not started.
+		// The fill is a landmark, not decoration — a solid color says "the
+		// surface is alive and nothing has drawn yet", which a black screen
+		// cannot: "the renderer never ran" and "the app drew a black frame"
+		// look identical without it. The two halves (red right, green left)
+		// make that distinction readable by eye, and by a pixel probe.
+		s.egl.clear(0.85, 0.15, 0.15, 1)
+		if width > 0 && height > 0 {
+			s.egl.scissor(0, 0, width/2, height)
+			s.egl.clear(0.15, 0.75, 0.25, 1)
+			s.egl.scissorOff()
+		}
 	}
 	s.egl.swap()
 }
-
-// RequestFrame does nothing yet: Android paces frames with the
-// Choreographer the Activity owns, so until the JNI layer reports frames
-// the backend draws when Java reports the surface (Backend.OnSurfaceChanged).
-func (s *Surface) RequestFrame() {}
 
 // RefreshRate returns 0: the skeleton does not ask the display its rate
 // yet, and 0 means unknown in this interface.

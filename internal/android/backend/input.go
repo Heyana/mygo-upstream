@@ -708,3 +708,8 @@ func KeyBatch(in KeyEventInput) KeyOutcome {
 	DispatchInput(events)
 	return outcome
 }
+
+// SetSurfaceSink points DispatchInput at a window's handler, which is what
+// makes a mapped event reach the content. The backend sets it when it makes
+// its window (window.go's NewWindow); nothing else should.
+func SetSurfaceSink(fn func(platform.SurfaceEvent) bool) { SurfaceSink = fn }

@@ -166,3 +166,17 @@ func releaseWindow(window unsafe.Pointer) {
 		C.ANativeWindow_release((*C.ANativeWindow)(window))
 	}
 }
+
+// scissor limits drawing to a rectangle in device pixels, so the landmark
+// fill can be two colors (see Surface.PresentPixels). Lower-left origin, as
+// glScissor is.
+func (e *eglState) scissor(x, y, w, h int) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	C.glEnable(C.GL_SCISSOR_TEST)
+	C.glScissor(C.GLint(x), C.GLint(y), C.GLsizei(w), C.GLsizei(h))
+}
+
+// scissorOff lifts the limit scissor set, so nothing later draws clipped.
+func (e *eglState) scissorOff() { C.glDisable(C.GL_SCISSOR_TEST) }
