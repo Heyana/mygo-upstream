@@ -8,3 +8,10 @@ examples/*/build/
 packages/cli/npm/*/bin/
 .DS_Store
 mygo.ts
+
+# android/ 的构建产物（libmygo.so 由 scripts/android-build.sh 产出）
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/app/src/main/jniLibs/**/*.so

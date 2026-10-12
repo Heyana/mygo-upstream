@@ -131,3 +131,28 @@ Windows GUI tests need Windows with the WebView2 Runtime (a GitHub Actions
   sleeping; measure work by counts, not durations. A test that can time
   out while the code is right has a race to fix, in the test or the
   product, not a timeout to raise or a rerun to hide behind.
+
+## Runbook
+
+Android build/install/EGL checks live in `scripts/android-*.sh` (bash; run them from
+anywhere, they find the repo themselves). Toolchain paths default to this machine's
+measured values and are overridable by env (`ANDROID_HOME`/`ANDROID_SDK_ROOT`,
+`ANDROID_NDK_VERSION=28.2.13676358`, `JAVA_HOME`, `MYGO_ANDROID_CC`,
+`MYGO_ANDROID_PKG`, `MYGO_ANDROID_SO`):
+
+```sh
+bash scripts/android-doctor.sh          # toolchain self-check: SDK≥31 / NDK r28 / JDK 17 / CC / adb / emulator
+bash scripts/android-build.sh           # Go .so (c-shared) → 16KB align check → Gradle if android/ exists
+bash scripts/android-build.sh --so-only # the .so and its page-align check only
+bash scripts/android-run.sh             # adb install + am start + logcat
+bash scripts/android-egl-stress.sh      # 20x foreground/background + 10x rotation, blank-frame report
+```
+
+The `.so` is `GOOS=android GOARCH=arm64 CGO_ENABLED=1 go build -buildmode=c-shared`
+with the NDK r28 `aarch64-linux-android29-clang`; it lands in
+`android/app/src/main/jniLibs/arm64-v8a/` when that exists, else in `.mygo/android/`
+(gitignored). **NDK r28 already links 16KB-aligned (`align 2**14`), so never set
+`CGO_LDFLAGS`; the build script only *verifies* alignment with `llvm-objdump -p`.**
+`android-run.sh` and `android-egl-stress.sh` read the package/activity from
+`android/app/src/main/AndroidManifest.xml` and say exactly what is missing instead of
+guessing; the stress test reports "无设备，未跑" when no device is attached.

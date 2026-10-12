@@ -1,0 +1,70 @@
+// mygo Android 宿主工程 —— app 模块
+//
+// 本模块 **不使用 externalNativeBuild / CMake**：
+// Go 侧的 libmygo.so 由 Go 工具链（cgo / gomobile bind 之外的 C shared 目标）单独产出，
+// 产物按 ABI 放进 app/src/main/jniLibs/<abi>/libmygo.so 即可被 AGP 打包。
+// 因此这里只需要 Android SDK，不需要在本工程里配 NDK 编译。
+plugins {
+    id 'com.android.application'
+    // ⚠️ 这里 **故意不写** id 'org.jetbrains.kotlin.android'：
+    //    AGP 9.0 默认 android.builtInKotlin=true，官方明确说 kotlin-android 插件
+    //    与 AGP 9.0 的新 DSL（newDsl=true）不兼容。.kt 源码由 AGP 内置 Kotlin 编译。
+}
+
+android {
+    // 包名（namespace）与 JNI 契约的包 org.mygo 一致，保证 System.loadLibrary("mygo")
+    // 找到的类与 Go 侧 JNI 符号 Java_org_mygo_Native_* 对得上。
+    namespace 'org.mygo'
+
+    // ── compileSdk 依据 ──────────────────────────────────────────────────
+    // 本机 platforms 里有 android-34 / 35 / 36 / 36.1（ls 输出见 T2B.md）。
+    // AGP 9.0 官方支持的最高 API 是 36.1；build-tools 36.0.0 恰好对应 API 36。
+    // 取 36（不是 36.1）以对齐 AGP 9.0 的默认 Build Tools 36.0.0，避免 36.1 需要
+    // build-tools 36.1.0 的组合差异。
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'org.mygo.host'
+        versionCode 1
+        versionName '1.0'
+
+        // ── minSdk 依据 ─────────────────────────────────────────────────
+        // 1) Go 运行时（runtime + runtime/cgo + 调度器）在 Android 上的支持下限是 API 21
+        //    （Go 官方 android 目标最低 API 21）；NDK r28 的最低支持 API 也是 21。
+        //    ⇒ 不能低于 21。
+        // 2) 本工程要用 android.view.SurfaceView + SurfaceHolder.Callback（API 1 起有），
+        //    不构成下限约束。
+        // 3) 取 **24（Android 7.0）** 而不是 21：21–23 上 ART 的 .so 加载/dex 边界行为
+        //    差异大（如早期 ART 对 JNI 静态方法与 System.loadLibrary 的错误处理更苛刻），
+        //    而 API 24 在 2026 年的设备覆盖率几乎是 100%，用 24 换取更少的历史坑、
+        //    不需要 multidex 兼容路径。若未来要压到 21，只改这一个数字即可。
+        minSdk 24
+
+        // targetSdk 与 compileSdk 对齐取 36。
+        // ⚠️ 已知副作用（Android 16 / API 36）：平台会 **忽略** targetSdk>=36 应用在大屏
+        //    （最小宽度 >= 600dp）上的 android:screenOrientation 锁定。也就是说
+        //    Manifest 里锁竖屏在平板上不生效 —— 这正是本工程坚持「surface 重建路径必须
+        //    正确」而不是只靠锁屏的原因，详见 MygoView.surfaceDestroyed 的注释。
+        targetSdk 36
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            // 首个宿主工程不开混淆：JNI 方法名会被 R8 改名/裁剪的风险不值得现在承担
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 不需要 BuildConfig / ViewBinding / Compose，保持最小
+    buildFeatures {
+        buildConfig false
+    }
+}

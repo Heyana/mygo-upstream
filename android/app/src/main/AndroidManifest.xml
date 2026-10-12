@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      mygo Android 宿主工程 Manifest
+
+      【屏幕方向：明确选择「锁竖屏 + 声明 configChanges」】
+      理由（三选一里选最稳的那个，并把代价写清）：
+        · 选 A「锁竖屏」：旋转时系统不改配置 ⇒ Activity **不会重建** ⇒ 不触发
+          surfaceDestroyed→surfaceCreated 这一对事件。首个宿主工程的验证变量最少，
+          能先把「Go 侧渲染 + 事件转发」跑通，不被生命周期噪声干扰。
+        · 选 B「允许旋转」：会走 Activity 重建路径。本工程的设计其实支持它
+          （见 MygoView 注释：Activity 与 Surface 是两个独立状态机，Go 侧保活），
+          但把「渲染能不能出来」和「旋转重建对不对」两个问题搅在一起，调试成本高。
+        代价（诚实写清）：横屏内容不会旋转。
+        改回可旋转只需删掉 android:screenOrientation 一行 —— 设计上不欠债。
+
+      【configChanges 的作用】
+        screenSize / smallestScreenSize / screenLayout / density 这些**不改变方向**的
+        配置变化（分屏、折叠屏展开、悬浮窗、字体/密度调整、显示尺寸改变）会频繁发生。
+        声明它们后，Activity 不重建，Surface 只走 surfaceChanged(w,h)，正是我们要的
+        「尺寸变化交给 Go 侧处理」的语义。
+
+      【为什么还要 configChanges 里写 orientation】
+        因为 targetSdk 36 在 API 36 大屏设备上会忽略 screenOrientation 锁定（见
+        app/build.gradle 的 targetSdk 注释）。那种设备上方向可能真的变，写了 orientation
+        可以让 Activity 不重建、直接把新尺寸走 surfaceChanged 给 Go 侧，比走重建路径更稳。
+    -->
+    <application
+        android:allowBackup="false"
+        android:label="mygo"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+
+        <activity
+            android:name=".MygoActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+
+</manifest>
