@@ -6,13 +6,20 @@ package main
 #include <jni.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include <android/log.h>
+#include <stdlib.h>
 
 // ANativeWindow_fromSurface lives in libandroid.
-#cgo LDFLAGS: -landroid
+#cgo LDFLAGS: -landroid -llog
+
+static void mygo_log(const char *s) {
+	__android_log_print(ANDROID_LOG_INFO, "mygo", "%s", s);
+}
 */
 import "C"
 
 import (
+	"fmt"
 	"unsafe"
 
 	"github.com/egoist/mygo/internal/android/backend"
@@ -22,6 +29,21 @@ import (
 // loads this library (System.loadLibrary("mygo")) and reaches it only
 // through the //export functions below.
 var theBackend = backend.New()
+
+// androidLog writes one line to logcat under the tag "mygo". The entry
+// points below call it so that a Java-side lifecycle event and the Go-side
+// reaction to it both show up in `adb logcat -s mygo:V`; without it the only
+// observable is the pixels, which says *that* something is wrong but not
+// *which* callback stopped arriving.
+//
+// Safe from a cgo callback thread: C.CString allocates with malloc (C owns
+// the pointer — no Go pointer crosses the boundary) and __android_log_print
+// does not re-enter the Go runtime.
+func androidLog(format string, args ...any) {
+	cs := C.CString(fmt.Sprintf(format, args...))
+	C.mygo_log(cs)
+	C.free(unsafe.Pointer(cs))
+}
 
 // The //export names are the JNI symbols Java binds to
 // org.mygo.Native's static native methods, so they are spelled out by the
@@ -48,8 +70,12 @@ func Java_org_mygo_Native_nativeOnSurfaceCreated(env *C.JNIEnv, clazz C.jclass, 
 	// just as well as checking the jobject would.
 	window := C.ANativeWindow_fromSurface(env, surface)
 	if window == nil {
+		androidLog("onSurfaceCreated: null ANativeWindow (Java passed a released Surface?)")
 		return
 	}
+	// %p, not %v: cgo types an opaque C struct as struct{}, so %v prints
+	// "&{{{}}}" and the pointer value -- the one useful part -- is lost.
+	androidLog("onSurfaceCreated window=%p", window)
 	theBackend.OnSurfaceCreated(unsafe.Pointer(window))
 }
 
@@ -59,6 +85,7 @@ func Java_org_mygo_Native_nativeOnSurfaceCreated(env *C.JNIEnv, clazz C.jclass, 
 //
 //export Java_org_mygo_Native_nativeOnSurfaceChanged
 func Java_org_mygo_Native_nativeOnSurfaceChanged(env *C.JNIEnv, clazz C.jclass, w, h, dpi C.jint) {
+	androidLog("onSurfaceChanged %dx%d dpi=%d", int(w), int(h), int(dpi))
 	theBackend.OnSurfaceChanged(int(w), int(h), int(dpi))
 }
 
@@ -69,6 +96,7 @@ func Java_org_mygo_Native_nativeOnSurfaceChanged(env *C.JNIEnv, clazz C.jclass, 
 //
 //export Java_org_mygo_Native_nativeOnSurfaceDestroyed
 func Java_org_mygo_Native_nativeOnSurfaceDestroyed(env *C.JNIEnv, clazz C.jclass) {
+	androidLog("onSurfaceDestroyed")
 	theBackend.OnSurfaceDestroyed()
 }
 
@@ -78,6 +106,7 @@ func Java_org_mygo_Native_nativeOnSurfaceDestroyed(env *C.JNIEnv, clazz C.jclass
 //
 //export Java_org_mygo_Native_nativeOnTouch
 func Java_org_mygo_Native_nativeOnTouch(env *C.JNIEnv, clazz C.jclass, action C.jint, x, y C.jfloat, eventTimeMs C.jlong) {
+	androidLog("onTouch action=%d x=%.1f y=%.1f t=%d", int(action), float32(x), float32(y), int64(eventTimeMs))
 	theBackend.OnTouch(int(action), float32(x), float32(y), int64(eventTimeMs))
 }
 
@@ -86,6 +115,7 @@ func Java_org_mygo_Native_nativeOnTouch(env *C.JNIEnv, clazz C.jclass, action C.
 //
 //export Java_org_mygo_Native_nativeOnKey
 func Java_org_mygo_Native_nativeOnKey(env *C.JNIEnv, clazz C.jclass, keyCode, action, metaState C.jint) {
+	androidLog("onKey code=%d action=%d meta=%d", int(keyCode), int(action), int(metaState))
 	theBackend.OnKey(int(keyCode), int(action), int(metaState))
 }
 
@@ -95,5 +125,6 @@ func Java_org_mygo_Native_nativeOnKey(env *C.JNIEnv, clazz C.jclass, keyCode, ac
 //
 //export Java_org_mygo_Native_nativeOnSizeChanged
 func Java_org_mygo_Native_nativeOnSizeChanged(env *C.JNIEnv, clazz C.jclass, w, h C.jint) {
+	androidLog("onSizeChanged %dx%d", int(w), int(h))
 	theBackend.OnSizeChanged(int(w), int(h))
 }

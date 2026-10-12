@@ -4,16 +4,14 @@
     <!--
       mygo Android 宿主工程 Manifest
 
-      【屏幕方向：明确选择「锁竖屏 + 声明 configChanges」】
-      理由（三选一里选最稳的那个，并把代价写清）：
-        · 选 A「锁竖屏」：旋转时系统不改配置 ⇒ Activity **不会重建** ⇒ 不触发
-          surfaceDestroyed→surfaceCreated 这一对事件。首个宿主工程的验证变量最少，
-          能先把「Go 侧渲染 + 事件转发」跑通，不被生命周期噪声干扰。
-        · 选 B「允许旋转」：会走 Activity 重建路径。本工程的设计其实支持它
-          （见 MygoView 注释：Activity 与 Surface 是两个独立状态机，Go 侧保活），
-          但把「渲染能不能出来」和「旋转重建对不对」两个问题搅在一起，调试成本高。
-        代价（诚实写清）：横屏内容不会旋转。
-        改回可旋转只需删掉 android:screenOrientation 一行 —— 设计上不欠债。
+      【屏幕方向：允许旋转（2026-10-12 真机验证通过后解锁）】
+      原选择是「锁竖屏」——旋转时系统不改配置 ⇒ Activity 不重建 ⇒ 首个宿主工程的
+      验证变量最少，能先把「Go 侧渲染 + 事件转发」跑通，不被生命周期噪声干扰。
+      真机上跑通「首帧 + 前后台 20 次 + 强制 Activity 重建 3 次」之后解锁：
+      因为下面声明了 configChanges="orientation|..."，旋转**不会重建 Activity**，
+      只走 surfaceChanged(w,h) 把新尺寸交给 Go 侧 —— 正是我们要的语义。
+      （若哪天要测「旋转导致 Activity 重建」那条更狠的路径，把 configChanges 里的
+       orientation 去掉即可，代价是每次旋转都重建。）
 
       【configChanges 的作用】
         screenSize / smallestScreenSize / screenLayout / density 这些**不改变方向**的
@@ -21,10 +19,10 @@
         声明它们后，Activity 不重建，Surface 只走 surfaceChanged(w,h)，正是我们要的
         「尺寸变化交给 Go 侧处理」的语义。
 
-      【为什么还要 configChanges 里写 orientation】
-        因为 targetSdk 36 在 API 36 大屏设备上会忽略 screenOrientation 锁定（见
-        app/build.gradle 的 targetSdk 注释）。那种设备上方向可能真的变，写了 orientation
-        可以让 Activity 不重建、直接把新尺寸走 surfaceChanged 给 Go 侧，比走重建路径更稳。
+      【configChanges 里为什么有 orientation】
+        有了它，方向变化不重建 Activity，只把新尺寸走 surfaceChanged(w,h) 给 Go 侧；
+        没有它，每次旋转都重建 Activity（surfaceDestroyed→surfaceCreated），
+        Go 侧虽然也能恢复（真机实测过），但会白白丢掉 EGL context 与渲染线程。
     -->
     <application
         android:allowBackup="false"
@@ -36,7 +34,6 @@
             android:name=".MygoActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|keyboardHidden|uiMode">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -26,9 +26,15 @@ extern const char *_GoStringPtr(_GoString_ s);
 #include <jni.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include <android/log.h>
+#include <stdlib.h>
 
 // ANativeWindow_fromSurface lives in libandroid.
 
+
+static void mygo_log(const char *s) {
+	__android_log_print(ANDROID_LOG_INFO, "mygo", "%s", s);
+}
 
 #line 1 "cgo-generated-wrapper"
 
