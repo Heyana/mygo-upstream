@@ -739,7 +739,7 @@ func initSurfaceCallbacks() {
 		if kind == platform.PointerDown {
 			clicks = s.clicks.Press(button, x, y, field[uint32](event, 20), doubleClick())
 		}
-		s.send(platform.SurfaceEvent{Kind: kind, X: x, Y: y, Button: button, Clicks: clicks, Mods: mods})
+		s.send(platform.SurfaceEvent{Kind: kind, PointerType: platform.PointerMouse, X: x, Y: y, Button: button, Clicks: clicks, Mods: mods})
 		if kind == platform.PointerUp && button == 0 && s.dragRequest == nil && s.lastPointer != 0 {
 			gdkEventFree(s.lastPointer)
 			s.lastPointer = 0
@@ -755,7 +755,7 @@ func initSurfaceCallbacks() {
 				}
 				s.lastPointer = gdkEventCopy(event)
 			}
-			s.send(platform.SurfaceEvent{Kind: platform.PointerMove, X: field[float64](event, 24), Y: field[float64](event, 32), Mods: gdkMods(field[uint32](event, 48))})
+			s.send(platform.SurfaceEvent{Kind: platform.PointerMove, PointerType: platform.PointerMouse, X: field[float64](event, 24), Y: field[float64](event, 32), Mods: gdkMods(field[uint32](event, 48))})
 		}
 		return false
 	})
@@ -772,7 +772,7 @@ func initSurfaceCallbacks() {
 		if s == nil {
 			return false
 		}
-		ev := platform.SurfaceEvent{Kind: platform.PointerScroll, X: field[float64](event, 24), Y: field[float64](event, 32), Mods: gdkMods(field[uint32](event, 40))}
+		ev := platform.SurfaceEvent{Kind: platform.PointerScroll, PointerType: platform.PointerMouse, X: field[float64](event, 24), Y: field[float64](event, 32), Mods: gdkMods(field[uint32](event, 40))}
 		const step = 50
 		switch field[int32](event, 44) {
 		case 0:

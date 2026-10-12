@@ -30,9 +30,10 @@
 //
 // # What the contract cannot carry
 //
-// platform.SurfaceEvent has no pointer list and no pointer id (see
-// internal/platform/surface.go), so a MotionEvent's whole pointer set cannot
-// be delivered. This file therefore produces two things from every touch:
+// platform.SurfaceEvent carries one pointer at a time — its PointerType and
+// its PointerID — but has no pointer list (see internal/platform/surface.go),
+// so a MotionEvent's whole pointer set cannot be delivered in the flat
+// stream. This file therefore produces two things from every touch:
 //
 //   - Events, the projection onto what the contract holds today, which a
 //     single-pointer consumer can use unchanged; and
@@ -388,6 +389,13 @@ func (d Decoder) dip(px float32) float64 {
 // Touch maps one MotionEvent to the platform.SurfaceEvents it means, with
 // the event's pointers beside them. See the file comment for why the second
 // finger reaches Pointers and not Events.
+//
+// The flat event of a contact carries the contact's own PointerID — the
+// value of MotionEvent.getPointerId, which names that finger for the whole
+// gesture — so a consumer can tell one finger's contact from another's. It
+// is the id and not the index on purpose: the index shifts as pointers come
+// and go, which is why Java sends both. A mouse event (hover, a wheel) has
+// one pointer and leaves PointerID 0, as the contract says.
 func (d *Decoder) Touch(in TouchInput) TouchResult {
 	res := TouchResult{}
 	if n := len(in.Pointers); n > 0 {
@@ -412,12 +420,14 @@ func (d *Decoder) Touch(in TouchInput) TouchResult {
 		d.downButton = button
 		res.Pointers[at].Action = PointerPressed
 		res.Events = []platform.SurfaceEvent{{
-			Kind:   platform.PointerDown,
-			X:      res.Pointers[at].X,
-			Y:      res.Pointers[at].Y,
-			Button: button,
-			Clicks: d.countClick(button, in.EventTimeMs, true),
-			Mods:   mods,
+			Kind:        platform.PointerDown,
+			PointerID:   uint64(res.Pointers[at].ID),
+			PointerType: platform.PointerTouch,
+			X:           res.Pointers[at].X,
+			Y:           res.Pointers[at].Y,
+			Button:      button,
+			Clicks:      d.countClick(button, in.EventTimeMs, true),
+			Mods:        mods,
 		}}
 	case actUp:
 		if at < 0 {
@@ -428,12 +438,14 @@ func (d *Decoder) Touch(in TouchInput) TouchResult {
 		button := d.downButton
 		res.Pointers[at].Action = PointerReleased
 		res.Events = []platform.SurfaceEvent{{
-			Kind:   platform.PointerUp,
-			X:      res.Pointers[at].X,
-			Y:      res.Pointers[at].Y,
-			Button: button,
-			Clicks: d.countClick(button, in.EventTimeMs, false),
-			Mods:   mods,
+			Kind:        platform.PointerUp,
+			PointerID:   uint64(res.Pointers[at].ID),
+			PointerType: platform.PointerTouch,
+			X:           res.Pointers[at].X,
+			Y:           res.Pointers[at].Y,
+			Button:      button,
+			Clicks:      d.countClick(button, in.EventTimeMs, false),
+			Mods:        mods,
 		}}
 	case actPointerDown:
 		// A second finger (or a third): the contract has nowhere to say
@@ -446,20 +458,40 @@ func (d *Decoder) Touch(in TouchInput) TouchResult {
 		if at >= 0 {
 			res.Pointers[at].Action = PointerReleased
 		}
-	case actMove, actHoverMove, actHoverEnter:
+	case actMove:
+		// A change during a press gesture (ACTION_DOWN..ACTION_UP): on a
+		// phone that is a finger, which is the contact the content's touch
+		// layer runs for, so it is PointerTouch.
 		if at < 0 {
 			break
 		}
 		res.Events = []platform.SurfaceEvent{{
-			Kind: platform.PointerMove,
-			X:    res.Pointers[at].X,
-			Y:    res.Pointers[at].Y,
-			Mods: mods,
+			Kind:        platform.PointerMove,
+			PointerID:   uint64(res.Pointers[at].ID),
+			PointerType: platform.PointerTouch,
+			X:           res.Pointers[at].X,
+			Y:           res.Pointers[at].Y,
+			Mods:        mods,
+		}}
+	case actHoverMove, actHoverEnter:
+		// A pointer that is over the surface but not touching it is a mouse
+		// or a pen, never a finger, so it is PointerMouse and does not
+		// enter the content's touch layer.
+		if at < 0 {
+			break
+		}
+		res.Events = []platform.SurfaceEvent{{
+			Kind:        platform.PointerMove,
+			PointerType: platform.PointerMouse,
+			X:           res.Pointers[at].X,
+			Y:           res.Pointers[at].Y,
+			Mods:        mods,
 		}}
 	case actHoverExit, actOutside:
 		// The pointer is no longer over the surface. ACTION_OUTSIDE can
 		// carry a position, but there is no position for it to be at on
-		// this surface, which is what leaving means.
+		// this surface, which is what leaving means. Leaving names no
+		// device, so the zero value (PointerMouse) stands.
 		res.Events = []platform.SurfaceEvent{{Kind: platform.PointerLeave}}
 	case actCancel:
 		// The gesture was taken from us. platform.SurfaceEventKind has no
@@ -477,14 +509,18 @@ func (d *Decoder) Touch(in TouchInput) TouchResult {
 		// flips and the horizontal one does not (AXIS_HSCROLL positive
 		// scrolls right, DX positive moves right). Android's axes are
 		// continuous, which is what Precise marks.
+		// ACTION_SCROLL comes from a wheel, a trackpad or rotary input,
+		// not from a finger on the screen, so it is not a touch and stays
+		// PointerMouse, the zero value.
 		res.Events = []platform.SurfaceEvent{{
-			Kind:    platform.PointerScroll,
-			X:       res.Pointers[at].X,
-			Y:       res.Pointers[at].Y,
-			DX:      d.dip(in.ScrollX),
-			DY:      -d.dip(in.ScrollY),
-			Precise: true,
-			Mods:    mods,
+			Kind:        platform.PointerScroll,
+			PointerType: platform.PointerMouse,
+			X:           res.Pointers[at].X,
+			Y:           res.Pointers[at].Y,
+			DX:          d.dip(in.ScrollX),
+			DY:          -d.dip(in.ScrollY),
+			Precise:     true,
+			Mods:        mods,
 		}}
 	case actButtonPress, actButtonRelease:
 		// A mouse's button press and release arrive around the

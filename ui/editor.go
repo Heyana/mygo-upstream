@@ -103,13 +103,13 @@ type editor struct {
 	undo, redo       []undoStep
 	lastEdit         time.Time
 	// now is the time, the engine's (engine.now), for what depends on it.
-	now func() time.Time
-	coalesce         bool
-	dragging         bool
-	dragUnit         int // 1 rune, 2 word, 3 line
-	dragStart        [2]int
-	pressMods        Modifiers
-	contentW         float32
+	now       func() time.Time
+	coalesce  bool
+	dragging  bool
+	dragUnit  int // 1 rune, 2 word, 3 line
+	dragStart [2]int
+	pressMods Modifiers
+	contentW  float32
 }
 
 func newEditor(now func() time.Time) *editor { return &editor{now: now} }

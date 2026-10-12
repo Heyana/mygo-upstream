@@ -487,6 +487,10 @@ func coreLocal[T any](e *node, key any, init func() T) *T {
 
 // state is what the runtime keeps about an element from frame to frame.
 type state struct {
+	// gestureEnabled is this frame's element asking for pinch and rotation
+	// updates (Gestures), and gestures what arrived since its last frame.
+	// Per-frame rather than sticky: an element that stops asking stops
+	// receiving, which is what lets a gesture end by the element going away.
 	gestureEnabled bool
 	gestures       []GestureEvent
 	rt             *engine

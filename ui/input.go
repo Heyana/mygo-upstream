@@ -11,6 +11,9 @@ import (
 // event handles a surface event on the main thread. It reports whether
 // an element takes files dragged over or dropped at the event's position.
 func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
+	// A touch contact is arbitrated before the pointer path: it may become
+	// a scroll of a container, which the pointer path would have made a
+	// press of a row (touch.go).
 	if ev.PointerType == platform.PointerTouch && rt.touchEvent(ev) {
 		return rt.touch.scrolling
 	}
@@ -34,9 +37,11 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	case platform.SurfaceFrame:
 		rt.surfaceFrame()
 	case platform.SurfaceResize:
-		if rt.touch.active && (rt.touch.selecting || rt.touch.scrollTarget != 0 && !rt.touch.scrolling) {
+		if rt.touch.active {
+			// A resize ends the contact: the container it began on and
+			// what it was over are no longer where they were.
 			rt.cancelPointer()
-			rt.touch.active = false
+			rt.touch.active, rt.touch.scrolling = false, false
 		}
 		rt.cancelTouchBack()
 		rt.requestFrame()
@@ -174,6 +179,7 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.accessAction(ev)
 	}
 	if ev.PointerType == platform.PointerTouch && (ev.Kind == platform.PointerUp || ev.Kind == platform.PointerCancel) {
+		// The finger left the surface: nothing hovers under it.
 		rt.pointerIn = false
 		rt.setHover(nil)
 	}

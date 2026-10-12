@@ -41,8 +41,12 @@ type GridState struct {
 	// cols is how many columns the items took in the last frame, and pivot
 	// the item Shift chooses from.
 	cols, pivot int
-	started     bool
-	rt          *engine
+	// cellGap is the space between two cells of a row, which coreGridView
+	// sets from the theme when it lays them out: it is what CellSize has
+	// to take out of the row's width to get a cell.
+	cellGap float32
+	started bool
+	rt      *engine
 }
 
 // ScrollTo scrolls the grid to show item at align, as ListState.ScrollTo

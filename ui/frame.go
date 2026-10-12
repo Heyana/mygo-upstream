@@ -163,4 +163,3 @@ func (r *Router) rtContext() *context {
 	}
 	return &r.rt.c
 }
-

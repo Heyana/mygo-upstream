@@ -516,7 +516,7 @@ func (s *surface) sideButton(kind platform.SurfaceEventKind, back bool, mods pla
 
 func (s *surface) mouse(kind platform.SurfaceEventKind, ev id, button int) {
 	x, y := s.location(ev)
-	s.send(platform.SurfaceEvent{Kind: kind, X: x, Y: y, Button: button, Clicks: sendInt(ev, "clickCount"), Mods: eventMods(ev)})
+	s.send(platform.SurfaceEvent{Kind: kind, PointerType: platform.PointerMouse, X: x, Y: y, Button: button, Clicks: sendInt(ev, "clickCount"), Mods: eventMods(ev)})
 }
 
 // macKeys maps virtual key codes that do not type a character.
@@ -853,7 +853,7 @@ func registerSurfaceClass() {
 				// A mouse wheel scrolls by lines: 40 DIPs, as in browsers.
 				dx, dy = dx*40, dy*40
 			}
-			s.send(platform.SurfaceEvent{Kind: platform.PointerScroll, X: x, Y: y, DX: -dx, DY: -dy, Precise: precise, Mods: eventMods(ev)})
+			s.send(platform.SurfaceEvent{Kind: platform.PointerScroll, PointerType: platform.PointerMouse, X: x, Y: y, DX: -dx, DY: -dy, Precise: precise, Mods: eventMods(ev)})
 		}),
 		method("keyDown:", func(self id, _ objc.SEL, ev id) {
 			s := b().surfaceOf(self)

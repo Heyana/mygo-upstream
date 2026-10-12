@@ -83,6 +83,8 @@ type host interface {
 // the view function, lays them out, paints them and routes input to the
 // elements of the last frame. Main thread only, except where noted.
 type engine struct {
+	// gestures are the pinch and rotation captures in progress, by the
+	// kind of gesture the surface named (gesture.go).
 	gestures map[string]gestureCapture
 	// inlineRects is placeInline's scratch, kept from frame to frame.
 	inlineRects []text.Rect
@@ -335,6 +337,13 @@ type engine struct {
 	access     bool
 	blinkStart time.Time
 	inFrame    bool
+	// repainted marks a frame that painted again without rebuilding, so
+	// endFrame can count it apart (a display shows those separately: they
+	// are cheap, and a run of them is why a rate can read low).
+	repainted bool
+	// frameStart is when the frame being run began, which endFrame reads
+	// into the diagnostics average (diagnostics.go).
+	frameStart time.Time
 	dark       bool
 	darkKnown  bool
 	// prefs are the desktop's preferences, read once until they change.
@@ -461,6 +470,7 @@ func (rt *engine) runFrame() {
 		return
 	}
 	rt.inFrame = true
+	rt.frameStart = time.Now()
 	defer rt.endFrame()
 
 	rt.frame++
@@ -662,9 +672,11 @@ func (rt *engine) surfaceFrame() {
 // armed them.
 func (rt *engine) repaintFrame(w, h, scale float32) {
 	rt.inFrame = true
+	rt.repainted = true
+	rt.frameStart = time.Now()
 	defer rt.endFrame()
 	rt.stats.begin(rt)
-	start := time.Now()
+	start := rt.frameStart
 	rt.c.now = rt.now()
 	rt.text.BeginFrame()
 	rt.repainting, rt.repaintAt = false, time.Time{}
@@ -882,6 +894,8 @@ func (rt *engine) close() {
 // during it.
 func (rt *engine) endFrame() {
 	rt.inFrame = false
+	recordFrameTime(time.Since(rt.frameStart), rt.repainted)
+	rt.repainted = false
 	if rt.closing {
 		rt.close()
 	}
@@ -956,6 +970,10 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	s.cursor, s.tip = e.cursor, e.tip
 	s.webView = e.webView
 	s.role = e.role
+	// The element asks for gestures for this frame only, so an element that
+	// stops calling Gestures stops receiving: what is left in s.gestures is
+	// what this frame's build will read (gesture.go's updateGestures).
+	s.gestureEnabled = e.gestureEnabled
 	s.input, s.caret, s.takesText, s.noIME = e.inputFn, e.caret, e.takesText, e.noIME
 	s.caretFn = e.caretFn
 	s.textContext = e.textContext

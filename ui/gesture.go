@@ -19,7 +19,9 @@ type gestureCapture struct {
 
 // Gestures opts an element into pinch/rotation input and returns updates since
 // its last frame. A gesture stays with its starting element until it ends or
-// that element disappears. Currently iOS supplies these events.
+// that element disappears. A backend whose surface reports SurfaceGesture
+// events supplies these; on a touchscreen the system recognizes the two-finger
+// pinch and rotate and hands them over as deltas.
 func (e *node) Gestures() []GestureEvent {
 	e.gestureEnabled = true
 	e.flags |= flagTrackPointer

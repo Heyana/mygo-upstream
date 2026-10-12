@@ -31,7 +31,7 @@ func TestInputTouchDown(t *testing.T) {
 		EventTimeMs: 1000,
 	})
 	want := platform.SurfaceEvent{
-		Kind: platform.PointerDown, X: 100, Y: 250, Button: 0, Clicks: 1,
+		Kind: platform.PointerDown, PointerID: 7, PointerType: platform.PointerTouch, X: 100, Y: 250, Button: 0, Clicks: 1,
 	}
 	if len(got.Events) != 1 || !sameEvent(got.Events[0], want) {
 		t.Fatalf("Touch = %+v, want one %+v", got.Events, want)
@@ -46,7 +46,7 @@ func TestInputTouchUp(t *testing.T) {
 	d.Touch(TouchInput{Action: actDown, Pointers: []Pointer{{ID: 7, X: 10, Y: 20}}, EventTimeMs: 1000})
 	got := d.Touch(TouchInput{Action: actUp, Pointers: []Pointer{{ID: 7, X: 12, Y: 24}}, EventTimeMs: 1050})
 	want := platform.SurfaceEvent{
-		Kind: platform.PointerUp, X: 12, Y: 24, Button: 0, Clicks: 1,
+		Kind: platform.PointerUp, PointerID: 7, PointerType: platform.PointerTouch, X: 12, Y: 24, Button: 0, Clicks: 1,
 	}
 	if len(got.Events) != 1 || !sameEvent(got.Events[0], want) {
 		t.Fatalf("Touch = %+v, want one %+v", got.Events, want)
@@ -59,7 +59,7 @@ func TestInputTouchUp(t *testing.T) {
 func TestInputTouchMove(t *testing.T) {
 	d := NewDecoder(160)
 	got := d.Touch(TouchInput{Action: actMove, ActionIndex: 0, Pointers: []Pointer{{ID: 1, X: 5, Y: 6}}, EventTimeMs: 10})
-	want := platform.SurfaceEvent{Kind: platform.PointerMove, X: 5, Y: 6}
+	want := platform.SurfaceEvent{Kind: platform.PointerMove, PointerID: 1, PointerType: platform.PointerTouch, X: 5, Y: 6}
 	if len(got.Events) != 1 || !sameEvent(got.Events[0], want) {
 		t.Fatalf("Touch = %+v, want one %+v", got.Events, want)
 	}
@@ -215,10 +215,77 @@ func TestInputScroll(t *testing.T) {
 		EventTimeMs: 6,
 	})
 	want := platform.SurfaceEvent{
-		Kind: platform.PointerScroll, X: 50, Y: 60, DX: 3, DY: -4, Precise: true,
+		Kind: platform.PointerScroll, PointerType: platform.PointerMouse, X: 50, Y: 60, DX: 3, DY: -4, Precise: true,
 	}
 	if len(got.Events) != 1 || !sameEvent(got.Events[0], want) {
 		t.Fatalf("Touch = %+v, want one %+v", got.Events, want)
+	}
+}
+
+// TestInputPointerType pins the device each flat event names. A contact — a
+// press, a release and a move between them — is a finger, so it carries
+// PointerTouch and enters the content's touch layer. Hover, a wheel scroll
+// and a release outside come from a mouse (or a pen), so they stay
+// PointerMouse and do not.
+func TestInputPointerType(t *testing.T) {
+	tests := []struct {
+		name string
+		in   TouchInput
+		want platform.PointerType
+	}{
+		{"a press is a finger", TouchInput{Action: actDown, Pointers: []Pointer{{ID: 0, X: 4, Y: 6}}}, platform.PointerTouch},
+		{"a release is a finger", TouchInput{Action: actUp, Pointers: []Pointer{{ID: 0, X: 4, Y: 6}}}, platform.PointerTouch},
+		{"a move between them is a finger", TouchInput{Action: actMove, Pointers: []Pointer{{ID: 0, X: 4, Y: 6}}}, platform.PointerTouch},
+		{"hover is a mouse", TouchInput{Action: actHoverMove, Pointers: []Pointer{{ID: 0, X: 4, Y: 6}}}, platform.PointerMouse},
+		{"a wheel is a mouse", TouchInput{Action: actScroll, Pointers: []Pointer{{ID: 0, X: 4, Y: 6}}, ScrollY: 3}, platform.PointerMouse},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDecoder(160)
+			got := d.Touch(tt.in)
+			if len(got.Events) != 1 {
+				t.Fatalf("Events = %+v, want one", got.Events)
+			}
+			if got.Events[0].PointerType != tt.want {
+				t.Errorf("PointerType = %v, want %v", got.Events[0].PointerType, tt.want)
+			}
+		})
+	}
+}
+
+// TestInputPointerID pins the id a contact's flat event carries: the value
+// Java read from MotionEvent.getPointerId, which names that finger for the
+// whole gesture. It is the id and not the index — a finger at index 0 with
+// id 7 reports 7 — because the index shifts as pointers come and go. A mouse
+// has one pointer, so hover and a wheel carry 0, the contract's value for a
+// device with no multi-touch.
+func TestInputPointerID(t *testing.T) {
+	tests := []struct {
+		name string
+		in   TouchInput
+		want uint64
+	}{
+		{"a press carries the finger's id", TouchInput{Action: actDown, Pointers: []Pointer{{ID: 7, X: 4, Y: 6}}}, 7},
+		{"a move carries it too", TouchInput{Action: actMove, Pointers: []Pointer{{ID: 7, X: 4, Y: 6}}}, 7},
+		{"a release carries it", TouchInput{Action: actUp, Pointers: []Pointer{{ID: 7, X: 4, Y: 6}}}, 7},
+		{"a move naming the second pointer carries its id", TouchInput{
+			Action: actMove, ActionIndex: 1,
+			Pointers: []Pointer{{ID: 7, X: 4, Y: 6}, {ID: 9, X: 40, Y: 60}},
+		}, 9},
+		{"hover is a mouse and has no second pointer", TouchInput{Action: actHoverMove, Pointers: []Pointer{{ID: 3, X: 4, Y: 6}}}, 0},
+		{"a wheel is a mouse", TouchInput{Action: actScroll, Pointers: []Pointer{{ID: 3, X: 4, Y: 6}}, ScrollY: 3}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDecoder(160)
+			got := d.Touch(tt.in)
+			if len(got.Events) != 1 {
+				t.Fatalf("Events = %+v, want one", got.Events)
+			}
+			if got.Events[0].PointerID != tt.want {
+				t.Errorf("PointerID = %d, want %d", got.Events[0].PointerID, tt.want)
+			}
+		})
 	}
 }
 
