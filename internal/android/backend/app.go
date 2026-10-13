@@ -88,6 +88,10 @@ type Backend struct {
 	// surface is the drawing surface of the Activity's window; it exists
 	// from the first surfaceCreated until the backend quits.
 	surface *Surface
+	// surfaceRenewed tells that a surface has already arrived, so the next
+	// one is a replacement and the window is told (SurfaceRenew). See
+	// surfaceCreated.
+	surfaceRenewed bool
 	// win is the app's window, once App.Run's NewWindow has made it. The
 	// backend owns it because the surface events that drive it arrive here.
 	win *window
@@ -383,11 +387,25 @@ func (b *Backend) OnKey(keyCode, action, metaState int) {
 	b.Post(func() { b.key(keyCode, action, metaState) })
 }
 
-// surfaceCreated (pump) makes the EGL display and context the first time
-// and only ever (re)builds the EGLSurface, which is the whole point of the
-// split: the Activity destroys and recreates its Surface on every
-// background/foreground switch.
+// surfaceCreated (pump) adopts the ANativeWindow of a (re)created surface and,
+// when it replaced an earlier one, tells the window its renderer has to be
+// made again. The EGL display and context are made once and kept; only the
+// EGLSurface is rebuilt, which is the whole point of the split (see egl.go).
 func (b *Backend) surfaceCreated(window unsafe.Pointer) {
+	renew := b.adoptSurface(window)
+	if renew {
+		// 🔴 Delivered outside the lock: b.deliver takes b.mu too, and a
+		// sync.Mutex is not reentrant — renewing from inside the lock
+		// deadlocked the pump on the first background switch.
+		log.Printf("mygo/android: new surface, renewing the window's renderer")
+		b.deliver(platform.SurfaceEvent{Kind: platform.SurfaceRenew})
+	}
+}
+
+// adoptSurface takes the ANativeWindow of a (re)created surface and reports
+// whether it replaced an earlier one, which is when the window's renderer has
+// to be made again. See surfaceCreated for the whole story.
+func (b *Backend) adoptSurface(window unsafe.Pointer) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.egl == nil {
@@ -395,12 +413,36 @@ func (b *Backend) surfaceCreated(window unsafe.Pointer) {
 	}
 	if err := b.egl.init(); err != nil {
 		log.Printf("mygo/android: egl: %v", err)
-		return
+		return false
 	}
 	if b.surface == nil {
 		b.surface = &Surface{b: b, egl: b.egl}
 	}
 	b.surface.window = window
+	// 🔴 A new ANativeWindow means the ui layer's GPU renderer must be made
+	// again, and nothing else tells it so.
+	//
+	// The Activity destroys and recreates its Surface on every lock and every
+	// background/foreground switch, and the ANativeWindow* that arrives here is
+	// a different object each time (see MygoView's surfaceDestroyed). The ui
+	// layer's windowHost, though, drew its first frame long ago: it still holds
+	// the renderer it made then and sees no reason to make another, so it draws
+	// into an ANativeWindow that is gone. Every frame fails, render() drops the
+	// renderer for good (the retry is a minute away, and never comes while the
+	// app is idle), and the app draws in memory from then on — the whole 18 MB
+	// frame copied through the CPU, with the logo page that first frame shows.
+	//
+	// SurfaceRenew is the one event whose meaning is exactly this ("the native
+	// objects a GPU renderer draws into changed"); Windows sends it when its
+	// web views take over the frame (windows/webview_embed.go), and it makes
+	// the window drop its renderer and ask for a frame. Android never sent it,
+	// which is why the two platforms differed here.
+	//
+	// Only a surface after the first renews: the first one arrives before
+	// App.Run and the window it would reach does not exist yet, and the
+	// window's own NewWindow asks for its first frame regardless.
+	renew := b.surfaceRenewed
+	b.surfaceRenewed = true
 	// 🔴 The EGLSurface is NOT made here, and that is the fix for a real
 	// EGL_BAD_ALLOC (0x3003) on a 1440x3168 phone.
 	//
@@ -417,6 +459,7 @@ func (b *Backend) surfaceCreated(window unsafe.Pointer) {
 	// gio's GioView ignores surfaceCreated outright — "surfaceChanged is
 	// guaranteed to be called immediately after this" — and makes its
 	// EGLSurface there. surfaceChanged below does the same thing now.
+	return renew
 }
 
 // surfaceChanged (pump) records the size and shows one frame — the frame

@@ -47,14 +47,19 @@ func (b *Backend) postFrame() {
 	}
 	b.Post(func() {
 		b.frameQueued.Store(false)
-		b.mu.Lock()
-		w := b.win
-		b.mu.Unlock()
-		if w == nil {
-			// No window yet: the request was made before the app created
-			// one, and the window's own NewWindow asks again.
-			return
-		}
-		w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
+		b.deliver(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
 	})
+}
+
+// deliver hands one event to the app's window handler, on the pump. It is a
+// no-op before the app has made its window (NewWindow), which is the window
+// whose handler is the one every event goes to.
+func (b *Backend) deliver(ev platform.SurfaceEvent) {
+	b.mu.Lock()
+	w := b.win
+	b.mu.Unlock()
+	if w == nil {
+		return
+	}
+	w.h.SurfaceEvent(ev)
 }
