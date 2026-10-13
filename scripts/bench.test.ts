@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type Latest, type Run, latestCommits, merge, parse } from "./bench.ts";
+import { dirname, join } from "node:path";
+import { type Latest, type Run, benchmarkPackages, latestCommits, merge, parse } from "./bench.ts";
 
 const output = `goos: darwin
 goarch: arm64
@@ -83,6 +83,55 @@ async function mergeRuns(dir: string, runs: Run[]): Promise<void> {
 async function readLatest(dir: string): Promise<Latest> {
   return JSON.parse(await readFile(join(dir, "data", "latest.json"), "utf8"));
 }
+
+async function benchmarkFixture(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "bench-packages-"));
+  expect(Bun.spawnSync(["git", "init", "-q", dir]).exitCode).toBe(0);
+  const files: Record<string, string> = {
+    "go.mod": "module benchmarkfixture\n\ngo 1.27.1\n",
+    "root_test.go": 'package fixture\nimport "testing"\nfunc BenchmarkRoot(b *testing.B) {}\n',
+    "mixed/base.go": "package mixed\n",
+    "mixed/bench_windows_test.go": 'package mixed\nimport "testing"\nfunc BenchmarkWindows(b *testing.B) {}\n',
+    "internal/e2e/bench_test.go": 'package e2e\nimport "testing"\nfunc BenchmarkGUI(b *testing.B) {}\n',
+    "ui/testdata/bench_test.go": 'package fixture_test\nimport "testing"\nfunc BenchmarkExternal(b *testing.B) {}\n',
+  };
+  for (const goos of ["darwin", "linux", "windows"]) {
+    files[`platform/${goos}/driver_${goos}.go`] = "package driver\n";
+    files[`platform/${goos}/bench_test.go`] = `//go:build ${goos}\n\npackage driver\nimport "testing"\nfunc BenchmarkGPU(b *testing.B) {}\n`;
+  }
+  for (const [file, text] of Object.entries(files)) {
+    await mkdir(dirname(join(dir, file)), { recursive: true });
+    await writeFile(join(dir, file), text);
+  }
+  return dir;
+}
+
+describe("benchmark packages", () => {
+  test("honors platform files and build tags, retaining external testdata benchmarks", async () => {
+    const dir = await benchmarkFixture();
+    try {
+      const goos = Bun.spawnSync(["go", "env", "GOOS"], { cwd: dir }).stdout.toString().trim();
+      const expected = [".", `./platform/${goos}`, "./ui/testdata"];
+      if (goos === "windows") expected.push("./mixed");
+      expect(await benchmarkPackages(false, dir)).toEqual(expected.sort());
+      expect(await benchmarkPackages(true, dir)).toEqual([...expected, "./internal/e2e"].sort());
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reports package errors other than excluded platform files", async () => {
+    const dir = await benchmarkFixture();
+    try {
+      await mkdir(join(dir, "broken"));
+      await writeFile(join(dir, "broken", "base.go"), "package first\n");
+      await writeFile(join(dir, "broken", "bench_test.go"), 'package second\nimport "testing"\nfunc BenchmarkBroken(b *testing.B) {}\n');
+      await expect(benchmarkPackages(false, dir)).rejects.toThrow("found packages");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("merge", () => {
   test("keeps each commit's runs by OS and day, and their series", async () => {

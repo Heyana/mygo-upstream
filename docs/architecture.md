@@ -3198,7 +3198,9 @@ bun scripts/bench.ts run --e2e           # internal/e2e's too, in a desktop sess
 bun scripts/bench.ts run ./ui --count 3  # one package, fewer runs
 ```
 
-It finds the packages with benchmarks and runs them one at a time
+It finds benchmark files in Git's tracked and untracked files, then uses
+`go list` to select those included by the current platform, build tags and
+cgo settings. Explicit `testdata` packages remain included. It runs them one at a time
 (`-p 1`), each benchmark six times for half a second (`-count 6
 -benchtime 500ms`), and keeps the median of each metric: `ns/op`,
 `B/op`, `allocs/op` and those a benchmark reports; `MB/s` follows from
