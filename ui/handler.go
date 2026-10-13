@@ -47,10 +47,14 @@ const (
 
 // InputEvent is input an element takes as it comes (HandleInput).
 type InputEvent struct {
-	Kind   InputKind
-	Key    Key
-	Mods   Modifiers
-	Repeat bool
+	Kind InputKind
+	Key  Key
+	// PhysicalKey is Key by position on an ANSI US keyboard, whatever the
+	// layout types: the S key is KeyS on a Cyrillic layout too, where Key
+	// is KeyUnknown. KeyUnknown where the platform does not report it.
+	PhysicalKey Key
+	Mods        Modifiers
+	Repeat      bool
 	// Software marks modifiers supplied by InputModifiers rather than hardware.
 	Software bool
 	// Text of InputText, InputCompose and InputCommand, and Caret the
@@ -64,7 +68,7 @@ type InputEvent struct {
 	// middle.
 	Button int
 	Clicks int
-	// DX and DY are what InputScroll scrolls by; positive DY moves the view
+	// DX and DY are what InputScroll scrolls by, in local axes; positive DY moves the view
 	// down the content.
 	DX, DY  float32
 	Precise bool
@@ -149,7 +153,10 @@ func (rt *engine) deliver(s *state, ev InputEvent) bool {
 	if s == nil || s.input == nil {
 		return false
 	}
-	ev.X, ev.Y = rt.pointerX-s.x, rt.pointerY-s.y
+	ev.X, ev.Y = s.local(rt.pointerX, rt.pointerY)
+	if ev.Kind == InputScroll {
+		ev.DX, ev.DY = s.vector(rt.pointerX, rt.pointerY, ev.DX, ev.DY)
+	}
 	softwareKey := !s.inputComposing && ((ev.Kind == InputText || ev.Kind == InputTextReplace) && len(ev.Text) == 1 && ev.Text[0] < 128 || ev.Kind == InputKeyDown && softwareControlKey(ev.Key))
 	if ev.Kind == InputCompose {
 		s.inputComposing = ev.Text != ""
@@ -190,7 +197,7 @@ func (rt *engine) deliver(s *state, ev InputEvent) bool {
 // focusHandler returns the state of the focused element when it handles
 // its input.
 func (rt *engine) focusHandler() *state {
-	if s := rt.states[rt.focused]; s != nil && s.input != nil && rt.windowFocused {
+	if s := rt.states[rt.focused]; s != nil && s.input != nil && rt.windowFocus() {
 		return s
 	}
 	return nil

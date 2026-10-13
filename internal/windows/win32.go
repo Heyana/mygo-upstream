@@ -370,6 +370,7 @@ const (
 	tpmReturnCmd   = 0x0100
 	mncClose       = 1
 
+	monitorDefaultToNull    = 0
 	monitorDefaultToNearest = 2
 	monitorDefaultToPrimary = 1
 	monitorInfoPrimary      = 1
@@ -383,6 +384,9 @@ const (
 	vkMenu    = 0x12
 	vkLWin    = 0x5B
 	vkRWin    = 0x5C
+
+	vkProcessKey = 0xE5
+	vkPacket     = 0xE7
 
 	cfUnicodeText = 13
 	cfDIB         = 8

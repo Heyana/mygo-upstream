@@ -195,7 +195,7 @@ func (p *Painter) paintInline(e *node) {
 	}
 	for ch := e.first; ch != nil; ch = ch.next {
 		if ch.flags&flagInvisible == 0 {
-			p.paintInline(ch)
+			p.element(ch)
 		}
 	}
 }
@@ -204,7 +204,7 @@ func (p *Painter) paintInline(e *node) {
 // keyboard and MyGo rings it.
 func (e *node) ringShown() bool {
 	rt := e.c.rt
-	return e.flags&(flagFocusable|flagOwnRing) == flagFocusable && rt.focused == e.id && rt.focusVisible && rt.windowFocused
+	return e.flags&(flagFocusable|flagOwnRing) == flagFocusable && rt.focused == e.id && rt.focusVisible && rt.windowFocus()
 }
 
 // accessInline describes the elements inside text e that are more than
@@ -222,7 +222,7 @@ func (rt *engine) accessInline(t *platform.AccessTree, e *node, parent int) {
 		}
 		n := platform.AccessNode{
 			ID: ch.id, Parent: parent, Role: role, Label: ch.label,
-			Bounds: platform.RectF{X: float64(ch.x), Y: float64(ch.y), W: float64(ch.w), H: float64(ch.h)},
+			Bounds: accessBounds(ch),
 		}
 		rt.accessDetails(ch, &n)
 		t.Nodes = append(t.Nodes, n)

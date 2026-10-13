@@ -19,7 +19,9 @@ import (
 // shown with a 2D context where the browser has no WebGL 2. A textarea out
 // of sight has the keyboard while the window has: input methods compose
 // in it, at the caret of the content, and its clipboard events carry the
-// clipboard.
+// clipboard. Its inputmode is "none" while nothing in the content takes
+// text, so that touch devices, which show their keyboard for a focused
+// textarea, show it only for a text input.
 type surface struct {
 	w             *window
 	canvas, input js.Value
@@ -59,7 +61,7 @@ func newSurface(w *window) (*surface, error) {
 	s.canvas = doc.Call("createElement", "canvas")
 	s.canvas.Set("tabIndex", -1)
 	s.input = doc.Call("createElement", "textarea")
-	for k, v := range map[string]string{"autocomplete": "off", "autocorrect": "off", "autocapitalize": "off", "spellcheck": "false", "tabindex": "-1"} {
+	for k, v := range map[string]string{"autocomplete": "off", "autocorrect": "off", "autocapitalize": "off", "spellcheck": "false", "tabindex": "-1", "inputmode": "none"} {
 		s.input.Call("setAttribute", k, v)
 	}
 	w.el.Call("appendChild", s.canvas)
@@ -416,7 +418,8 @@ func (s *surface) key(e js.Value, down bool) {
 	case "Dead", "Process", "Unidentified", "Compose":
 		return
 	}
-	k := keyOf(name, e.Get("code").String())
+	code := e.Get("code").String()
+	k, physical := keyOf(name, code), codeKey(code)
 	primary := mods&platform.ModCtrl != 0
 	if down && primary && mods&(platform.ModAlt|platform.ModShift) == 0 {
 		switch k {
@@ -426,7 +429,7 @@ func (s *surface) key(e js.Value, down bool) {
 		case platform.KeyC, platform.KeyX:
 			// The content copies now, and the copy event that follows
 			// gives the browser the text.
-			s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: k, Mods: mods, Repeat: e.Get("repeat").Bool()})
+			s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: k, PhysicalKey: physical, Mods: mods, Repeat: e.Get("repeat").Bool()})
 			s.copied = true
 			return
 		}
@@ -435,7 +438,7 @@ func (s *surface) key(e js.Value, down bool) {
 	if down {
 		kind = platform.KeyPressed
 	}
-	s.send(platform.SurfaceEvent{Kind: kind, Key: k, Mods: mods, Repeat: e.Get("repeat").Bool()})
+	s.send(platform.SurfaceEvent{Kind: kind, Key: k, PhysicalKey: physical, Mods: mods, Repeat: e.Get("repeat").Bool()})
 	if !down {
 		return
 	}
@@ -458,6 +461,12 @@ func keyOf(name, code string) platform.Key {
 	if k, ok := named[name]; ok {
 		return k
 	}
+	return codeKey(code)
+}
+
+// codeKey returns the key at a KeyboardEvent's code: its position on an
+// ANSI US keyboard (SurfaceEvent.PhysicalKey).
+func codeKey(code string) platform.Key {
 	switch {
 	case len(code) == 4 && code[:3] == "Key":
 		return platform.KeyA + platform.Key(code[3]-'A')
@@ -606,8 +615,18 @@ func (s *surface) SetCursor(c platform.Cursor) {
 }
 
 // SetTextInput moves the textarea to the caret, where input methods show
-// their candidates.
+// their candidates, and lets touch devices show their keyboard while an
+// element takes text: browsers show it, or hide it, as the inputmode of
+// the focused textarea changes. Keys of a hardware keyboard come either
+// way.
 func (s *surface) SetTextInput(t platform.TextInputState) {
+	if t.Active != s.text.Active {
+		mode := "none"
+		if t.Active {
+			mode = "text"
+		}
+		s.input.Call("setAttribute", "inputmode", mode)
+	}
 	s.text = t
 	st := s.input.Get("style")
 	if !t.Active {

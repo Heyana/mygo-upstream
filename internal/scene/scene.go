@@ -81,7 +81,10 @@ const (
 	// instead of their own colors.
 	OpGlyphs
 	// OpImage paints Src of Image into Rect, clipped to Radii, with
-	// Opacity, in shades of gray if Grayscale.
+	// Opacity, in shades of gray if Grayscale, tinted by Color unless it
+	// is zero (its pixels times its straight color and alpha). A negative
+	// Src.W or Src.H flips the image along that axis, Src.X or Src.Y then
+	// being its right or bottom edge; nothing outside Src shows.
 	OpImage
 	// OpPushClip clips the following ops to Rect with Radii, intersected
 	// with the clip in effect, until the matching OpPopClip.
@@ -105,6 +108,9 @@ const (
 type Op struct {
 	Kind Kind
 	Rect Rect
+	// Transform maps this operation's geometry to frame pixels. Clips
+	// retain the transform with which they were pushed.
+	Transform Affine
 	// Radii are the corner radii: top-left, top-right, bottom-right and
 	// bottom-left.
 	Radii [4]float32
@@ -147,6 +153,9 @@ type Op struct {
 	Image     *Image
 	Src       Rect
 	Grayscale bool
+	// Pixelated samples an OpImage's nearest pixel, as pixel art draws,
+	// where it would interpolate between pixels.
+	Pixelated bool
 	// Opacity multiplies the op's colors; 0 means 1.
 	Opacity float32
 }
@@ -192,6 +201,8 @@ func InnerRadii(r Rect, radii, w [4]float32) (Rect, [4]float32) {
 
 // Glyph is a glyph mask or color glyph copied from an atlas into a frame.
 type Glyph struct {
+	// Transform is applied before its Op's transform, for inline text.
+	Transform Affine
 	// X, Y, W and H place the glyph's bitmap, in device pixels.
 	X, Y, W, H float32
 	// U, V, UW and VH are the bitmap's rectangle in its atlas.
@@ -299,6 +310,38 @@ type Scene struct {
 	// premultiplied RGBA bitmaps such as emoji, and the coverage of
 	// subpixel glyphs.
 	MaskAtlas, ColorAtlas *Atlas
+	// Canvases are the canvases (NewCanvas) drawn anew for this frame,
+	// which renderers draw before it, whether it shows them or not, while
+	// the atlases their glyphs point at hold them.
+	Canvases []*Image
+}
+
+// EachCanvas calls fn with the canvases the scene draws anew or shows,
+// each once, those a canvas shows before it.
+func (s *Scene) EachCanvas(fn func(*Image)) {
+	seen := map[*Image]bool{}
+	var visit func(c *Image)
+	visit = func(c *Image) {
+		if c == nil || c.Scene == nil || seen[c] {
+			return
+		}
+		seen[c] = true
+		c.Scene.eachShown(visit)
+		fn(c)
+	}
+	for _, c := range s.Canvases {
+		visit(c)
+	}
+	s.eachShown(visit)
+}
+
+// eachShown calls fn with the canvases the scene's images show.
+func (s *Scene) eachShown(fn func(*Image)) {
+	for i := range s.Ops {
+		if op := &s.Ops[i]; op.Kind == OpImage && op.Image != nil && op.Image.Scene != nil {
+			fn(op.Image)
+		}
+	}
 }
 
 // Reset empties the scene for another frame, keeping its storage.
@@ -312,6 +355,8 @@ func (s *Scene) Reset(width, height int, color Color) {
 	clear(s.Effects)
 	s.Effects = s.Effects[:0]
 	s.Wide = s.Wide[:0]
+	clear(s.Canvases)
+	s.Canvases = s.Canvases[:0]
 }
 
 var lastImageID atomic.Uint64
@@ -325,6 +370,18 @@ type Image struct {
 	// 4*W bytes.
 	W, H int
 	Pix  []byte
+	// Scene, in a canvas (NewCanvas), is what the image shows: renderers
+	// draw it into the image's texture whenever the version changes,
+	// rather than upload Pix, which the CPU renderer draws it into, and
+	// PixVersion is the version Pix holds.
+	Scene      *Scene
+	PixVersion uint64
+}
+
+// NewCanvas returns a w×h image that renderers draw from a scene of its
+// own, cleared to transparent: render to texture.
+func NewCanvas(w, h int) *Image {
+	return &Image{id: lastImageID.Add(1), version: 1, W: w, H: h, Scene: &Scene{Width: w, Height: h, Scale: 1}}
 }
 
 // NewImage converts img to a premultiplied RGBA bitmap.
@@ -351,6 +408,19 @@ func (m *Image) Version() uint64 { return m.version }
 
 // Changed records that Pix was modified.
 func (m *Image) Changed() { m.version++ }
+
+// Resize keeps the image's texture-cache identity while changing its size.
+// Renderers replace the backing texture on a size change, so an animated
+// clip does not leave a new texture in the cache on every frame.
+func (m *Image) Resize(w, h int) {
+	m.W, m.H = w, h
+	if cap(m.Pix) >= 4*w*h {
+		m.Pix = m.Pix[:4*w*h]
+	} else {
+		m.Pix = make([]byte, 4*w*h)
+	}
+	m.Changed()
+}
 
 // FitRadii scales corner radii down so that adjacent ones fit along each
 // side of r, as CSS does; renderers apply it before drawing.

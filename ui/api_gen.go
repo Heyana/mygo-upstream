@@ -3,6 +3,7 @@
 package ui
 
 import (
+	platform "github.com/egoist/mygo/internal/platform"
 	transfer "github.com/egoist/mygo/transfer"
 	image "image"
 	time "time"
@@ -98,12 +99,7 @@ func (_handle *Route) View(c *Context, fn func(r *Route)) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(_handle.coreView(_ctx, func() func(r *Route) {
-		if fn == nil {
-			return nil
-		}
-		return func(r *Route) { fn(r) }
-	}()))
+	return wrapElement(_handle.coreView(_ctx, fn))
 }
 
 // View builds the page shown with fn, in a column taking the room it is
@@ -114,12 +110,7 @@ func (_handle *Router) View(c *Context, fn func(r *Route)) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(_handle.coreView(_ctx, func() func(r *Route) {
-		if fn == nil {
-			return nil
-		}
-		return func(r *Route) { fn(r) }
-	}()))
+	return wrapElement(_handle.coreView(_ctx, fn))
 }
 
 // View builds splash until startup is ready, then shows content, crossfading
@@ -132,17 +123,7 @@ func (_handle *Startup) View(c *Context, splash func(), content func()) Element 
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(_handle.coreView(_ctx, func() func() {
-		if splash == nil {
-			return nil
-		}
-		return func() { splash() }
-	}(), func() func() {
-		if content == nil {
-			return nil
-		}
-		return func() { content() }
-	}()))
+	return wrapElement(_handle.coreView(_ctx, splash, content))
 }
 
 // Panel builds fn in the panel of the collapsible while it is open, and as
@@ -156,12 +137,7 @@ func (_handle CollapsibleParts) Panel(fn func()) Element {
 	}
 	_ctx := _parts.c
 	_ = _ctx
-	return wrapElement(_parts.Panel(func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(_parts.Panel(fn))
 }
 
 // Progress returns how far the collapsible is open, from 0 closed to 1
@@ -306,10 +282,10 @@ func (_handle *Context) After(d time.Duration) {
 	_ctx.After(d)
 }
 
-// AnimationContext asks for another frame as soon as the display can show
+// AnimationFrame asks for another frame as soon as the display can show
 // it, for something moving. Call it in every frame while it moves. A
 // drawing that moves while the layout stays asks with
-// Painter.AnimationContext instead, whose frames do not build the view.
+// Painter.AnimationFrame instead, whose frames do not build the view.
 func (_handle *Context) AnimationFrame() {
 	_ctx := _handle.build()
 	if _ctx == nil {
@@ -350,6 +326,20 @@ func (_handle *Context) CloseToast(id string) {
 		return
 	}
 	_ctx.CloseToast(id)
+}
+
+// DisableAnimations makes the values that animate in this frame
+// (AnimateTo, Animate, Spring), the element transitions and the pages of
+// routers go to their targets at once, as SwiftUI's disablesAnimations:
+// for a change that should not show as motion, as restoring a window's
+// state or jumping to a search result. Call it before building what
+// changes.
+func (_handle *Context) DisableAnimations() {
+	_ctx := _handle.build()
+	if _ctx == nil {
+		return
+	}
+	_ctx.DisableAnimations()
 }
 
 // MeasureText returns the size spans of text take as Painter.RichText draws
@@ -408,12 +398,7 @@ func (_handle *Context) OpenURLThen(url string, done func(err error)) {
 	if _ctx == nil {
 		return
 	}
-	_ctx.OpenURLThen(url, func() func(err error) {
-		if done == nil {
-			return nil
-		}
-		return func(err error) { done(err) }
-	}())
+	_ctx.OpenURLThen(url, done)
 }
 
 // Preferences returns the settings of the desktop that controls follow.
@@ -538,12 +523,7 @@ func (_handle *Context) ToastAction(message string, label string, action func())
 	if _ctx == nil {
 		return
 	}
-	_ctx.ToastAction(message, label, func() func() {
-		if action == nil {
-			return nil
-		}
-		return func() { action() }
-	}())
+	_ctx.ToastAction(message, label, action)
 }
 
 // Vibrancy reports whether the window shows its material
@@ -605,12 +585,7 @@ func Accordion(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreAccordion(_ctx, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreAccordion(_ctx, fn))
 }
 
 // AccordionItem creates a section of an Accordion: a header showing title,
@@ -621,12 +596,7 @@ func AccordionItem(c *Context, title string, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreAccordionItem(_ctx, title, open, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreAccordionItem(_ctx, title, open, fn))
 }
 
 // AlertDialog shows an alert over the window while *open is true, as
@@ -801,12 +771,7 @@ func CheckboxGroup(c *Context, label string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreCheckboxGroup(_ctx, label, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreCheckboxGroup(_ctx, label, fn))
 }
 
 // Collapsible creates a disclosure, as SwiftUI's DisclosureGroup: label
@@ -822,12 +787,7 @@ func Collapsible(c *Context, label string, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreCollapsible(_ctx, label, open, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreCollapsible(_ctx, label, open, fn))
 }
 
 // CollapsibleBase creates a collapsible without a look, open while *open:
@@ -1067,12 +1027,7 @@ func Field(c *Context, label string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreField(_ctx, label, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreField(_ctx, label, fn))
 }
 
 // Fieldset creates a group of the fields that fn builds, under legend,
@@ -1087,12 +1042,7 @@ func Fieldset(c *Context, legend string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreFieldset(_ctx, legend, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreFieldset(_ctx, legend, fn))
 }
 
 // FindBar creates a bar for finding text while *open is true, as Safari's
@@ -1127,12 +1077,7 @@ func Form(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreForm(_ctx, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreForm(_ctx, fn))
 }
 
 // ForwardButton creates a button going forward in r's history, as
@@ -1183,12 +1128,7 @@ func GridView(c *Context, s *GridState, n int, minWidth float32, height float32,
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreGridView(_ctx, s, n, minWidth, height, func() func(i int) {
-		if item == nil {
-			return nil
-		}
-		return func(i int) { item(i) }
-	}()))
+	return wrapElement(coreGridView(_ctx, s, n, minWidth, height, item))
 }
 
 // Icon creates an element showing an SVG as an icon: its shapes in the
@@ -1231,12 +1171,7 @@ func InputAccessoryBar(c *Context, actions []InputAction, expanded *bool, handle
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreInputAccessoryBar(_ctx, actions, expanded, func() func(a0 string) {
-		if handler == nil {
-			return nil
-		}
-		return func(a0 string) { handler(a0) }
-	}()))
+	return wrapElement(coreInputAccessoryBar(_ctx, actions, expanded, handler))
 }
 
 // Link creates a text that opens url in the browser when clicked, or
@@ -1262,12 +1197,7 @@ func Local[T any](e Element, key any, init func() T) *T {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return coreLocal[T](e.nodeFor(_ctx.rt), key, func() func() T {
-		if init == nil {
-			return nil
-		}
-		return func() T { return init() }
-	}())
+	return coreLocal[T](e.nodeFor(_ctx.rt), key, init)
 }
 
 // MenuButton creates a button showing label and an arrow, which opens a
@@ -1286,12 +1216,7 @@ func MenuButton(c *Context, label string, build func(m *Menu)) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreMenuButton(_ctx, label, func() func(m *Menu) {
-		if build == nil {
-			return nil
-		}
-		return func(m *Menu) { build(m) }
-	}()))
+	return wrapElement(coreMenuButton(_ctx, label, build))
 }
 
 // Meter creates a bar showing value between lo and hi, as AppKit's level
@@ -1316,12 +1241,7 @@ func Modal(c *Context, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreModal(_ctx, open, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreModal(_ctx, open, fn))
 }
 
 // NewTester starts testing view in a window of width×height DIPs. Two
@@ -1376,17 +1296,7 @@ func Outline[K comparable](c *Context, s *OutlineState[K], roots []K, children f
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreOutline[K](_ctx, s, roots, func() func(a0 K) []K {
-		if children == nil {
-			return nil
-		}
-		return func(a0 K) []K { return children(a0) }
-	}(), func() func(item K) {
-		if row == nil {
-			return nil
-		}
-		return func(item K) { row(item) }
-	}()))
+	return wrapElement(coreOutline[K](_ctx, s, roots, children, row))
 }
 
 // OutlineTable creates an outline whose rows are a Table's, as AppKit's
@@ -1407,17 +1317,7 @@ func OutlineTable[K comparable](c *Context, s *OutlineState[K], columns []TableC
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreOutlineTable[K](_ctx, s, columns, roots, func() func(a0 K) []K {
-		if children == nil {
-			return nil
-		}
-		return func(a0 K) []K { return children(a0) }
-	}(), func() func(item K, col int) {
-		if cell == nil {
-			return nil
-		}
-		return func(item K, col int) { cell(item, col) }
-	}()))
+	return wrapElement(coreOutlineTable[K](_ctx, s, columns, roots, children, cell))
 }
 
 // Overlay builds fn's elements above the rest of the window. Place them
@@ -1429,12 +1329,7 @@ func Overlay(c *Context, fn func()) {
 	if _ctx == nil {
 		return
 	}
-	coreOverlay(_ctx, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}())
+	coreOverlay(_ctx, fn)
 }
 
 // Popover shows fn's elements in a panel below anchor while *open is
@@ -1445,12 +1340,7 @@ func Popover(c *Context, anchor Element, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(corePopover(_ctx, anchor.nodeFor(_ctx.rt), open, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(corePopover(_ctx, anchor.nodeFor(_ctx.rt), open, fn))
 }
 
 // PopoverBase shows a panel without a look below anchor while *open is
@@ -1537,12 +1427,7 @@ func RadioGroup(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreRadioGroup(_ctx, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreRadioGroup(_ctx, fn))
 }
 
 // RangeSlider creates a slider of two knobs setting *low and *high between
@@ -1765,12 +1650,7 @@ func Sidebar(c *Context, selected *string, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSidebar(_ctx, selected, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreSidebar(_ctx, selected, fn))
 }
 
 // SidebarItem creates an item of a Sidebar choosing id, showing label
@@ -1792,12 +1672,7 @@ func SidebarSection(c *Context, title string, open *bool, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSidebarSection(_ctx, title, open, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreSidebarSection(_ctx, title, open, fn))
 }
 
 // Slider creates a slider setting *value between lo and hi.
@@ -1845,9 +1720,10 @@ func Spacer(c *Context) Element {
 }
 
 // Spinner creates an indicator of work of unknown length, as AppKit's
-// spinning progress indicator: spokes turning, as high as the font size.
-// Assistive technology sees a progress indicator of unknown length; name
-// it with Label.
+// spinning progress indicator: spokes turning, as high as the font size,
+// in the theme's muted text color, or the color TextColor gives it, as one
+// on a chosen row of a list needs. Assistive technology sees a progress
+// indicator of unknown length; name it with Label.
 func Spinner(c *Context) Element {
 	_ctx := c.build()
 	if _ctx == nil {
@@ -1867,17 +1743,7 @@ func Split(c *Context, size *float32, first func(), second func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSplit(_ctx, size, func() func() {
-		if first == nil {
-			return nil
-		}
-		return func() { first() }
-	}(), func() func() {
-		if second == nil {
-			return nil
-		}
-		return func() { second() }
-	}()))
+	return wrapElement(coreSplit(_ctx, size, first, second))
 }
 
 // SplitVertical is Split with first above second, *size its height.
@@ -1886,17 +1752,7 @@ func SplitVertical(c *Context, size *float32, first func(), second func()) Eleme
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreSplitVertical(_ctx, size, func() func() {
-		if first == nil {
-			return nil
-		}
-		return func() { first() }
-	}(), func() func() {
-		if second == nil {
-			return nil
-		}
-		return func() { second() }
-	}()))
+	return wrapElement(coreSplitVertical(_ctx, size, first, second))
 }
 
 // StepSlider creates a slider setting *value to lo or a multiple of step
@@ -1979,12 +1835,7 @@ func Table(c *Context, s *ListState, columns []TableColumn, n int, cell func(row
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreTable(_ctx, s, columns, n, func() func(row int, col int) {
-		if cell == nil {
-			return nil
-		}
-		return func(row int, col int) { cell(row, col) }
-	}()))
+	return wrapElement(coreTable(_ctx, s, columns, n, cell))
 }
 
 // Tabs creates a row of tabs showing labels, of which *selected is the
@@ -2232,12 +2083,7 @@ func ToggleGroup(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreToggleGroup(_ctx, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreToggleGroup(_ctx, fn))
 }
 
 // TokenField creates a field of tokens, as of tags or the recipients of a
@@ -2281,12 +2127,7 @@ func Toolbar(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreToolbar(_ctx, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreToolbar(_ctx, fn))
 }
 
 // TooltipBase shows a tip without a look by anchor: fn styles the tip and
@@ -2340,12 +2181,7 @@ func Tree(c *Context, fn func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreTree(_ctx, func() func() {
-		if fn == nil {
-			return nil
-		}
-		return func() { fn() }
-	}()))
+	return wrapElement(coreTree(_ctx, fn))
 }
 
 // TreeItem creates an item of a Tree showing label, inside the item it is
@@ -2358,12 +2194,7 @@ func TreeItem(c *Context, label string, open *bool, children func()) Element {
 	if _ctx == nil {
 		return Element{}
 	}
-	return wrapElement(coreTreeItem(_ctx, label, open, func() func() {
-		if children == nil {
-			return nil
-		}
-		return func() { children() }
-	}()))
+	return wrapElement(coreTreeItem(_ctx, label, open, children))
 }
 
 // View returns the content of a window whose user interface view builds,
@@ -2428,6 +2259,21 @@ func (_handle Element) Absolute() Element {
 	return wrapElement(_node.Absolute())
 }
 
+// Access has fn describe the element further to assistive technology,
+// as it builds the element's node, only while assistive technology reads
+// the window: what costs too much to give every frame, as the text of a
+// large document. The node is a type internal to this module, so only
+// its packages describe elements so, as package ui/editor does.
+func (_handle Element) Access(fn func(n *platform.AccessNode)) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Access(fn))
+}
+
 // ActiveDescendant tells assistive technology that d has the keyboard
 // focus while the element does: the option the arrows are on in a list or
 // a menu that keeps the focus itself, as a combobox's input does. Call it
@@ -2484,6 +2330,7 @@ func (_handle Element) AlignSelf(a Align) Element {
 // keeps frames coming while it moves; key tells apart the animations of
 // the element. The value starts at the first target. When the desktop asks
 // for less motion (Preferences.ReduceMotion), it goes to target at once.
+// AnimateTo takes springs and delays too.
 func (_handle Element) Animate(key any, target float32, d time.Duration) float32 {
 	_node := _handle.node()
 	if _node == nil {
@@ -2492,6 +2339,60 @@ func (_handle Element) Animate(key any, target float32, d time.Duration) float32
 	_ctx := _node.c
 	_ = _ctx
 	return _node.Animate(key, target, d)
+}
+
+// AnimateColor returns a color that goes to target as a says, mixed with
+// premultiplied alpha as transitions mix colors, so that a color fading
+// from transparent keeps its hue; key tells apart the element's animated
+// colors. It starts at the first target. As changing colors moves
+// nothing, colors still change smoothly while the desktop asks for less
+// motion; DisableAnimations shows them at once.
+func (_handle Element) AnimateColor(key any, target Color, a Animation) Color {
+	_node := _handle.node()
+	if _node == nil {
+		return *new(Color)
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.AnimateColor(key, target, a)
+}
+
+// AnimatePose moves the element to p as a says, after its own transform
+// (Transform), and fades it, and returns the element. The element keeps
+// going in frames that only paint, without building the view, as Core
+// Animation and the Web Animations API run transforms and opacity: the
+// cheapest motion there is, which a view large or slow to build keeps
+// smooth. The pointer, carets and overlays follow it as they follow
+// transforms. It starts at the first pose. While the desktop asks for less
+// motion, it moves at once, and only fades smoothly.
+//
+//	card.AnimatePose(ui.Pose{Y: lift, Scale: 1.02}, ui.Snappy)
+func (_handle Element) AnimatePose(p Pose, a Animation) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.AnimatePose(p, a))
+}
+
+// AnimateTo returns a value that goes to target as a says, and keeps
+// frames coming while it moves; key tells apart the animated values of
+// the element, which Animate, AnimateWith and Spring share. The value
+// starts at the first target (Jump sets it elsewhere first). A new target
+// on the way, or a new kind of Animation, takes over from where the value
+// is: a spring keeps its velocity, even that of a curve. When the desktop
+// asks for less motion (Preferences.ReduceMotion), the value goes to its
+// target at once.
+func (_handle Element) AnimateTo(key any, target float32, a Animation) float32 {
+	_node := _handle.node()
+	if _node == nil {
+		return 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.AnimateTo(key, target, a)
 }
 
 // AnimateWith returns a value that moves to target over d as Animate does,
@@ -2504,6 +2405,19 @@ func (_handle Element) AnimateWith(key any, target float32, d time.Duration, eas
 	_ctx := _node.c
 	_ = _ctx
 	return _node.AnimateWith(key, target, d, ease)
+}
+
+// Arrived reports whether the value animated under key came to rest at
+// its target in this frame, after moving there: true in that frame only,
+// for the view to go on, as by removing what faded out.
+func (_handle Element) Arrived(key any) bool {
+	_node := _handle.node()
+	if _node == nil {
+		return false
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Arrived(key)
 }
 
 // AspectRatio makes the height the width divided by r.
@@ -2568,6 +2482,23 @@ func (_handle Element) AutoFocus() Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.AutoFocus())
+}
+
+// BackfaceHidden hides the element, and takes it from the pointer, while
+// its 3D transform turns its back to the viewer, as CSS's
+// backface-visibility: hidden: the two faces of a card turning over, the
+// back turned 180 degrees more than the front, show one at a time.
+//
+//	front.RotateY(turn).Perspective(800).BackfaceHidden()
+//	back.RotateY(turn + 180).Perspective(800).BackfaceHidden()
+func (_handle Element) BackfaceHidden() Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.BackfaceHidden())
 }
 
 // Background fills the element, in place of a gradient.
@@ -2686,8 +2617,9 @@ func (_handle Element) BottomPercent(p float32) Element {
 	return wrapElement(_node.BottomPercent(p))
 }
 
-// Bounds returns the element's box in the previous frame, in DIPs relative
-// to the window; it is empty for an element the previous frame lacked.
+// Bounds returns the previous frame's transformed bounding rectangle in
+// window DIPs; it is empty for an element the previous frame lacked.
+// LayoutBounds returns its box before visual transforms.
 func (_handle Element) Bounds() Rect {
 	_node := _handle.node()
 	if _node == nil {
@@ -2880,6 +2812,23 @@ func (_handle Element) Composing() bool {
 	return _node.Composing()
 }
 
+// ContentTransition animates the element's content as it changes, as t
+// says: the text of a Text, the icon of an Icon, the picture of an Image.
+// Changes animate from frame to frame while the element is painted, in
+// frames that only paint. While the desktop asks for less motion, content
+// fades without moving.
+//
+//	ui.Text(c, strconv.Itoa(app.count)).ContentTransition(ui.ContentTransition{Numeric: true, Down: app.decreased})
+func (_handle Element) ContentTransition(t ContentTransition) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.ContentTransition(t))
+}
+
 // ContextMenu gives the element a context menu, which build fills with
 // items. The system shows it where the element is clicked with the
 // secondary button, or Control-clicked on macOS, and, while the element or
@@ -2917,12 +2866,7 @@ func (_handle Element) ContextMenu(build func(m *Menu)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.ContextMenu(func() func(m *Menu) {
-		if build == nil {
-			return nil
-		}
-		return func(m *Menu) { build(m) }
-	}()))
+	return wrapElement(_node.ContextMenu(build))
 }
 
 // Cursor sets the pointer's shape over the element.
@@ -3082,12 +3026,50 @@ func (_handle Element) DragDataFrom(data func() transfer.Data, options ...transf
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.DragDataFrom(func() func() transfer.Data {
-		if data == nil {
-			return nil
-		}
-		return func() transfer.Data { return data() }
-	}(), options...))
+	return wrapElement(_node.DragDataFrom(data, options...))
+}
+
+// DragEnded reports whether the pointer pressing the element, and moving,
+// let go since the last frame, with how fast it moved then, as
+// DragVelocity: a spring taking over (SpringOptions.Velocity) keeps the
+// fling going. A click, which does not move, ends no drag.
+func (_handle Element) DragEnded() (float32, float32, bool) {
+	_node := _handle.node()
+	if _node == nil {
+		return 0, 0, false
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.DragEnded()
+}
+
+// DragOffset returns where Draggable shows the element in this frame,
+// from its place in the layout: following the pointer, or on its way to
+// rest. Reading it builds the view in every frame the element moves in,
+// as AnimateTo does, which the element otherwise moves in without: for
+// what follows the element, as a backdrop fading as a sheet goes down.
+// Call it after Draggable.
+func (_handle Element) DragOffset() Point {
+	_node := _handle.node()
+	if _node == nil {
+		return *new(Point)
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.DragOffset()
+}
+
+// DragVelocity returns how fast, in DIPs per second along the element's
+// local axes, the pointer pressing the element moves now: zero once it
+// stops for a moment, or while nothing presses the element.
+func (_handle Element) DragVelocity() (float32, float32) {
+	_node := _handle.node()
+	if _node == nil {
+		return 0, 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.DragVelocity()
 }
 
 // DragWindow makes the element a handle that moves the window, such as the
@@ -3103,8 +3085,38 @@ func (_handle Element) DragWindow() Element {
 	return wrapElement(_node.DragWindow())
 }
 
-// Dragged reports how far the pointer moved since the last frame while
-// pressing the element.
+// Draggable lets the pointer move the element from its place in the
+// layout, by *offset, and returns the element. As the pointer drags it,
+// the element follows the pointer, along its parent's axes, and *offset
+// with it; once the pointer lets go, *offset is where the element comes to
+// rest, as o says, and it goes there. Setting *offset moves the element
+// there as well, as o.Animation says. A nil offset is kept in the element.
+//
+// The element moves after its own transform (Transform) and its pose
+// (AnimatePose), and goes to rest in frames that only paint, without
+// building the view, as AnimatePose moves it. Dragging reports that the
+// pointer drags it, once the pointer moved a few DIPs, Transitioning that
+// it moves, and DragOffset where it shows. A press dragging it is no
+// click; a press catches it as it moves. While the desktop asks for less
+// motion (Preferences.ReduceMotion), it goes to rest at once.
+//
+//	sheet.Draggable(&app.sheet, ui.DraggableOptions{
+//		Axis:   ui.Vertical,
+//		Bounds: &ui.Rect{H: 400},
+//		Snap:   ui.Nearest(ui.Point{}, ui.Point{Y: 200}, ui.Point{Y: 400}),
+//	})
+func (_handle Element) Draggable(offset *Point, o DraggableOptions) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Draggable(offset, o))
+}
+
+// Dragged reports how far the pointer moved in the element's local axes
+// since the last frame while pressing it.
 func (_handle Element) Dragged() (float32, float32, bool) {
 	_node := _handle.node()
 	if _node == nil {
@@ -3115,7 +3127,8 @@ func (_handle Element) Dragged() (float32, float32, bool) {
 	return _node.Dragged()
 }
 
-// Dragging reports whether the element is dragging its value (Drag).
+// Dragging reports whether the element is dragging its value (Drag), or
+// the pointer is dragging the element (Draggable).
 func (_handle Element) Dragging() bool {
 	_node := _handle.node()
 	if _node == nil {
@@ -3136,12 +3149,7 @@ func (_handle Element) Draw(fn func(p *Painter, r Rect)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.Draw(func() func(p *Painter, r Rect) {
-		if fn == nil {
-			return nil
-		}
-		return func(p *Painter, r Rect) { fn(p, r) }
-	}()))
+	return wrapElement(_node.Draw(fn))
 }
 
 // DrawOver paints on the element with p after its children.
@@ -3152,12 +3160,7 @@ func (_handle Element) DrawOver(fn func(p *Painter, r Rect)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.DrawOver(func() func(p *Painter, r Rect) {
-		if fn == nil {
-			return nil
-		}
-		return func(p *Painter, r Rect) { fn(p, r) }
-	}()))
+	return wrapElement(_node.DrawOver(fn))
 }
 
 // DroppedFiles returns the paths of the files dropped on the element since
@@ -3540,12 +3543,7 @@ func (_handle Element) HandleInput(fn func(ev InputEvent) bool) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.HandleInput(func() func(ev InputEvent) bool {
-		if fn == nil {
-			return nil
-		}
-		return func(ev InputEvent) bool { return fn(ev) }
-	}()))
+	return wrapElement(_node.HandleInput(fn))
 }
 
 // HandleTextInput connects an element to the system's text-input services.
@@ -3638,6 +3636,19 @@ func (_handle Element) ID() uint64 {
 	return _node.ID()
 }
 
+// InView reports whether some of the element showed in the window in the
+// frame before, within the scroll containers and clips around it: to
+// animate it in as it scrolls into view, as Motion's whileInView.
+func (_handle Element) InView() bool {
+	_node := _handle.node()
+	if _node == nil {
+		return false
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.InView()
+}
+
 // InputAccessory attaches actions above the iOS system keyboard while this
 // input has focus. Other platforms ignore the native controls. The handler
 // runs on the UI thread without changing text focus or committing marked text.
@@ -3649,12 +3660,7 @@ func (_handle Element) InputAccessory(actions []InputAction, handler func(arg0 s
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.InputAccessory(actions, func() func(a0 string) {
-		if handler == nil {
-			return nil
-		}
-		return func(a0 string) { handler(a0) }
-	}()))
+	return wrapElement(_node.InputAccessory(actions, handler))
 }
 
 // InputModifiers adds software modifiers to ASCII text and control keys of
@@ -3669,12 +3675,7 @@ func (_handle Element) InputModifiers(mods Modifiers, consumed func()) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.InputModifiers(mods, func() func() {
-		if consumed == nil {
-			return nil
-		}
-		return func() { consumed() }
-	}()))
+	return wrapElement(_node.InputModifiers(mods, consumed))
 }
 
 // InputOptions supplies this frame's keyboard traits for an editable field or
@@ -3740,6 +3741,20 @@ func (_handle Element) Italic() Element {
 	return wrapElement(_node.Italic())
 }
 
+// Jump sets the value animated under key to value at once, as a drag
+// moves it under the pointer, and returns it. The value's velocity
+// follows the jumps from frame to frame, so that a spring taking over
+// from the last (AnimateTo) keeps going the way it went.
+func (_handle Element) Jump(key any, value float32) float32 {
+	_node := _handle.node()
+	if _node == nil {
+		return 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Jump(key, value)
+}
+
 // Justify places the children along the main axis.
 func (_handle Element) Justify(a Align) Element {
 	_node := _handle.node()
@@ -3776,9 +3791,10 @@ func (_handle Element) JustifySelf(a Align) Element {
 	return wrapElement(_node.JustifySelf(a))
 }
 
-// KeepFocus preserves the current editor's focus when this element is
-// pressed. Keyboard navigation still focuses it normally. Use it for
-// input toolbars and selection actions that should keep an IME alive.
+// KeepFocus leaves the keyboard focus where it is while the element, or
+// what is inside it, is pressed: the popups and bars of a control that
+// keeps typing while the user picks in them, as a combobox's options or a
+// code editor's completions and find buttons.
 func (_handle Element) KeepFocus() Element {
 	_node := _handle.node()
 	if _node == nil {
@@ -3787,6 +3803,21 @@ func (_handle Element) KeepFocus() Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.KeepFocus())
+}
+
+// Keyframes plays a sequence, holding its last value when done. It starts
+// on the first call, with the first frame's value. Keep the element and
+// key stable, and change Run when changing the sequence. Only active
+// playback asks for animation frames. Reduced motion completes playback at
+// its final value, including when the preference changes mid-sequence.
+func (_handle Element) Keyframes(key any, frames []Keyframe, options ...KeyframeOptions) float32 {
+	_node := _handle.node()
+	if _node == nil {
+		return 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Keyframes(key, frames, options...)
 }
 
 // Label names the element for assistive technology and for finding it in
@@ -3799,6 +3830,18 @@ func (_handle Element) Label(s string) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Label(s))
+}
+
+// LayoutBounds returns the previous frame's border box before transforms,
+// in the layout's window coordinates. Draw callbacks use these coordinates.
+func (_handle Element) LayoutBounds() Rect {
+	_node := _handle.node()
+	if _node == nil {
+		return *new(Rect)
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.LayoutBounds()
 }
 
 func (_handle Element) Left(v float32) Element {
@@ -3881,6 +3924,17 @@ func (_handle Element) Lines(min int, max int) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Lines(min, max))
+}
+
+// LocalToWindow maps a point in the previous frame's border box to the window.
+func (_handle Element) LocalToWindow(x float32, y float32) (float32, float32) {
+	_node := _handle.node()
+	if _node == nil {
+		return 0, 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.LocalToWindow(x, y)
 }
 
 // Loop returns the progress of an animation that starts over every
@@ -4006,12 +4060,7 @@ func (_handle Element) Menu(build func(m *Menu)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.Menu(func() func(m *Menu) {
-		if build == nil {
-			return nil
-		}
-		return func(m *Menu) { build(m) }
-	}()))
+	return wrapElement(_node.Menu(build))
 }
 
 func (_handle Element) MinHeight(v float32) Element {
@@ -4111,12 +4160,7 @@ func (_handle Element) OnPaste(fn func(text string) bool) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.OnPaste(func() func(text string) bool {
-		if fn == nil {
-			return nil
-		}
-		return func(text string) bool { return fn(text) }
-	}()))
+	return wrapElement(_node.OnPaste(fn))
 }
 
 // Opacity makes the element and its children translucent.
@@ -4207,6 +4251,18 @@ func (_handle Element) Password() Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Password())
+}
+
+// Perspective sees the element's transform in 3D from distance DIPs in
+// front of its origin (Perspective).
+func (_handle Element) Perspective(distance float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Perspective(distance))
 }
 
 // Placeholder shows s in an empty text input.
@@ -4360,11 +4416,14 @@ func (_handle Element) Role(r Role) Element {
 	return wrapElement(_node.Role(r))
 }
 
-// Rotate turns an Icon by degrees clockwise around its center, as a
-// spinner does:
+// Rotate rotates an element clockwise around its transform origin, which
+// changes no layout sizes. An Icon keeps turning its SVG artwork around its
+// center, as a spinner does:
 //
 //	spin := ui.Icon(c, loader)
 //	spin.Rotate(spin.Loop("spin", time.Second, ui.Linear) * 360)
+//
+// Use Transform(Rotation(degrees)) to rotate an icon's entire border box.
 func (_handle Element) Rotate(degrees float32) Element {
 	_node := _handle.node()
 	if _node == nil {
@@ -4373,6 +4432,36 @@ func (_handle Element) Rotate(degrees float32) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Rotate(degrees))
+}
+
+// RotateX turns the element in 3D around the horizontal axis through its
+// origin, after its existing transform, as RotationX: follow it with
+// Perspective to see it in depth.
+//
+//	card.RotateX(30).Perspective(800)
+func (_handle Element) RotateX(degrees float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.RotateX(degrees))
+}
+
+// RotateY turns the element in 3D around the vertical axis through its
+// origin, after its existing transform, as RotationY: a card turning over
+// shows its back past 90 degrees, mirrored.
+//
+//	card.RotateY(flip * 180).Perspective(800)
+func (_handle Element) RotateY(degrees float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.RotateY(degrees))
 }
 
 // Row lays the children out from left to right.
@@ -4449,6 +4538,17 @@ func (_handle Element) GridRows(n int) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Rows(n))
+}
+
+// Scale scales the element after its existing transform, around its origin.
+func (_handle Element) Scale(x float32, y float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Scale(x, y))
 }
 
 // ScrollIntoView scrolls the containers around the element as little as
@@ -4557,6 +4657,19 @@ func (_handle Element) SetTextSelection(start int, end int) Element {
 	return wrapElement(_node.SetTextSelection(start, end))
 }
 
+// Settled reports whether the value animated under key, by AnimateTo,
+// Animate, Spring or Keyframes, rests at its target in this frame: true
+// for an unknown key.
+func (_handle Element) Settled(key any) bool {
+	_node := _handle.node()
+	if _node == nil {
+		return false
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Settled(key)
+}
+
 // Shadow adds a box shadow, offset by x and y, blurred by blur and grown by
 // spread DIPs. As CSS's box-shadow, it shows only outside the box: a
 // translucent background does not show it through.
@@ -4617,6 +4730,30 @@ func (_handle Element) Size(w float32, h float32) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Size(w, h))
+}
+
+// Skew slants the element after its existing transform, around its
+// origin, by x degrees along the horizontal axis and y along the vertical.
+func (_handle Element) Skew(x float32, y float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Skew(x, y))
+}
+
+// Spring returns a value following target with a spring, as AnimateTo
+// does with Animation{Spring: options}: Smooth's spring without options.
+func (_handle Element) Spring(key any, target float32, options ...SpringOptions) float32 {
+	_node := _handle.node()
+	if _node == nil {
+		return 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Spring(key, target, options...)
 }
 
 // Step makes the values of a slider lo and the multiples of step from it,
@@ -4718,12 +4855,7 @@ func (_handle Element) TextCaretFunc(fn func() Rect) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.TextCaretFunc(func() func() Rect {
-		if fn == nil {
-			return nil
-		}
-		return func() Rect { return fn() }
-	}()))
+	return wrapElement(_node.TextCaretFunc(fn))
 }
 
 // TextColor sets the color of text.
@@ -4750,12 +4882,7 @@ func (_handle Element) TextContext(fn func() (string, int)) Element {
 	}
 	_ctx := _node.c
 	_ = _ctx
-	return wrapElement(_node.TextContext(func() func() (string, int) {
-		if fn == nil {
-			return nil
-		}
-		return func() (string, int) { return fn() }
-	}()))
+	return wrapElement(_node.TextContext(fn))
 }
 
 // TextRanges styles runs of a text input's text, in the frames that call
@@ -4887,6 +5014,31 @@ func (_handle Element) TrackScroll(s *ScrollState) Element {
 	return wrapElement(_node.TrackScroll(s))
 }
 
+// Transform sets the element's visual transform. Its origin is the center
+// of its border box unless TransformOrigin changes it.
+func (_handle Element) Transform(t Transform) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Transform(t))
+}
+
+// TransformOrigin sets the origin as fractions of the border box:
+// (0,0) is the top-left and (0.5,0.5) the center. Values outside the box
+// are allowed. Translation does not depend on the origin.
+func (_handle Element) TransformOrigin(x float32, y float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.TransformOrigin(x, y))
+}
+
 // Transition animates the element as t asks. The element needs the same
 // ID from frame to frame: a Key, or the same place among its siblings.
 // Elements that the change moves as well need a Transition of their own to
@@ -4899,8 +5051,10 @@ func (_handle Element) TrackScroll(s *ScrollState) Element {
 //		})
 //	}
 //
-// Changes made by resizing the window do not animate, and nothing does
-// while the desktop asks for less motion (Preferences.ReduceMotion).
+// Changes made by resizing the window do not animate. While the desktop
+// asks for less motion (Preferences.ReduceMotion), nothing moves: colors
+// still change smoothly, and an Enter or Exit that fades without
+// collapsing fades in place.
 func (_handle Element) Transition(t ElementTransition) Element {
 	_node := _handle.node()
 	if _node == nil {
@@ -4909,6 +5063,30 @@ func (_handle Element) Transition(t ElementTransition) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Transition(t))
+}
+
+// Transitioning reports whether the element's Transition was moving it,
+// or changing its colors, or its pose (AnimatePose) or Draggable was
+// moving it, in the frame before: false once it is where it goes.
+func (_handle Element) Transitioning() bool {
+	_node := _handle.node()
+	if _node == nil {
+		return false
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Transitioning()
+}
+
+// Translate moves the element after its existing transform.
+func (_handle Element) Translate(x float32, y float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Translate(x, y))
 }
 
 // Underline underlines text.
@@ -4945,6 +5123,18 @@ func (_handle Element) Value(s string) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.Value(s))
+}
+
+// Velocity returns how fast, in its units per second, the value animated
+// under key goes in this frame: zero for one at rest or unknown.
+func (_handle Element) Velocity(key any) float32 {
+	_node := _handle.node()
+	if _node == nil {
+		return 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.Velocity(key)
 }
 
 // Vertical makes a SliderBase go up, from lo at the bottom of its content
@@ -4992,6 +5182,18 @@ func (_handle Element) WidthPercent(p float32) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.WidthPercent(p))
+}
+
+// WindowToLocal maps a window point into the previous frame's border box.
+// ok is false for singular transforms, which take no pointer input.
+func (_handle Element) WindowToLocal(x float32, y float32) (float32, float32, bool) {
+	_node := _handle.node()
+	if _node == nil {
+		return 0, 0, false
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.WindowToLocal(x, y)
 }
 
 // Wrap starts a new line of children when they do not fit.
@@ -5125,7 +5327,7 @@ func (_handle ToastParts) CloseButton() Element {
 
 // Left returns how long the toast shows still, to count down, or 0 for one
 // that shows until it is closed. It does not move while the time of the
-// toasts stops; ask for frames with Context.AnimationContext to draw it
+// toasts stops; ask for frames with Context.AnimationFrame to draw it
 // moving.
 func (_handle ToastParts) Left() time.Duration {
 	_parts := _handle.resolve()

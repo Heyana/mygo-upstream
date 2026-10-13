@@ -317,10 +317,14 @@ type SurfaceEvent struct {
 	DX, DY  float64
 	Precise bool
 	Key     Key
-	Mods    Modifiers
-	Repeat  bool
-	Text    string
-	Caret   int
+	// PhysicalKey is the key by its position on an ANSI US keyboard,
+	// whatever the active layout types; KeyUnknown where the backend does
+	// not report it. Key and PhysicalKey agree on a US layout.
+	PhysicalKey Key
+	Mods        Modifiers
+	Repeat      bool
+	Text        string
+	Caret       int
 	// Snapshot places the caret at From + Caret after a TextInput replacement.
 	// UIKit sends snapshots of its surrounding-text proxy this way.
 	Snapshot bool
@@ -479,6 +483,35 @@ func KeyForRune(r rune) Key {
 		return KeySpace
 	}
 	return KeyUnknown
+}
+
+// scancodeKeys maps the scancodes of the letter, digit and punctuation keys
+// of an ANSI US keyboard to the key at that position. The main block's
+// codes are the same in Linux's evdev and in XT set 1, which Windows
+// reports.
+var scancodeKeys = map[uint16]Key{
+	2: Key1, 3: Key2, 4: Key3, 5: Key4, 6: Key5, 7: Key6, 8: Key7, 9: Key8, 10: Key9, 11: Key0,
+	12: KeyMinus, 13: KeyEqual,
+	16: KeyQ, 17: KeyW, 18: KeyE, 19: KeyR, 20: KeyT, 21: KeyY, 22: KeyU, 23: KeyI, 24: KeyO, 25: KeyP,
+	26: KeyBracketLeft, 27: KeyBracketRight,
+	30: KeyA, 31: KeyS, 32: KeyD, 33: KeyF, 34: KeyG, 35: KeyH, 36: KeyJ, 37: KeyK, 38: KeyL,
+	39: KeySemicolon, 40: KeyQuote, 41: KeyBackquote, 43: KeyBackslash,
+	44: KeyZ, 45: KeyX, 46: KeyC, 47: KeyV, 48: KeyB, 49: KeyN, 50: KeyM,
+	51: KeyComma, 52: KeyPeriod, 53: KeySlash,
+}
+
+// KeyForScancode returns the key at a scancode's position on an ANSI US
+// keyboard, whatever the layout types (SurfaceEvent.PhysicalKey), or
+// KeyUnknown for a key it does not map. A scancode is Linux's evdev code
+// (the X keycode less 8) or Windows's XT set 1 code without the extended
+// flag.
+func KeyForScancode(code uint16) Key { return scancodeKeys[code] }
+
+// KeyByPosition reports whether a key press whose layout key is key may
+// stand for its physical key: only when the layout types no US key, and a
+// shortcut modifier is held, so that typing stays on the layout.
+func KeyByPosition(key, physical Key, mods Modifiers) bool {
+	return key == KeyUnknown && physical != KeyUnknown && mods&(ModCtrl|ModAlt|ModSuper) != 0
 }
 
 // Cursor is a pointer shape.

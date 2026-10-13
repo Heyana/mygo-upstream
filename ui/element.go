@@ -4,6 +4,8 @@ import (
 	"math"
 	"strings"
 
+	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/scene"
 	"github.com/egoist/mygo/internal/text"
 )
 
@@ -244,6 +246,27 @@ type node struct {
 	cell                   gridCell
 	justifySelf            Align
 
+	// Visual geometry, composed after layout.
+	transform        Transform
+	originX, originY float32
+	originSet        bool
+	world            scene.Affine
+	// content is how its content changes (ContentTransition), when set.
+	content    ContentTransition
+	contentSet bool
+	// pose is where AnimatePose moves it, as poseAnim says, when poseSet;
+	// poseM and poseFade are where it shows now. reposed tells, in a frame
+	// that only paints, that its pose moved.
+	pose     Pose
+	poseAnim Animation
+	poseSet  bool
+	poseM    scene.Affine
+	poseFade float32
+	reposed  bool
+	// backface hides it while its 3D transform turns its back to the
+	// viewer (BackfaceHidden).
+	backface bool
+
 	// Painting.
 	bg           Color
 	fill         fillKind
@@ -326,6 +349,9 @@ type node struct {
 	accValue    string
 	accRange    [3]float64
 	hasRange    bool
+	// accFill describes the element to assistive technology further, as
+	// a code editor its text and selection.
+	accFill func(n *platform.AccessNode)
 	// accStep is how far the keys move the value of a range.
 	accStep float64
 
@@ -779,6 +805,19 @@ func (e *node) AttachTo(target *node, at, self Anchor) *node {
 	return e
 }
 
+// KeepFocus leaves the keyboard focus where it is while the element, or
+// what is inside it, is pressed: the popups and bars of a control that
+// keeps typing while the user picks in them, as a combobox's options or a
+// code editor's completions and find buttons.
+func (e *node) KeepFocus() *node { e.flags |= flagKeepFocus; return e }
+
+// Access has fn describe the element further to assistive technology,
+// as it builds the element's node, only while assistive technology reads
+// the window: what costs too much to give every frame, as the text of a
+// large document. The node is a type internal to this module, so only
+// its packages describe elements so, as package ui/editor does.
+func (e *node) Access(fn func(n *platform.AccessNode)) *node { e.accFill = fn; return e }
+
 // AspectRatio makes the height the width divided by r.
 func (e *node) AspectRatio(r float32) *node { e.aspect = r; return e }
 
@@ -1089,11 +1128,6 @@ func (e *node) hasState() bool {
 // Focusable lets the element take the keyboard focus, by a click or Tab.
 func (e *node) Focusable() *node { e.flags |= flagFocusable; return e }
 
-// KeepFocus preserves the current editor's focus when this element is
-// pressed. Keyboard navigation still focuses it normally. Use it for
-// input toolbars and selection actions that should keep an IME alive.
-func (e *node) KeepFocus() *node { e.flags |= flagKeepFocus; return e }
-
 // DragWindow makes the element a handle that moves the window, such as the
 // title bar of a frameless window. A double click on it maximizes the
 // window, as on a title bar.
@@ -1126,14 +1160,15 @@ func (e *node) DrawOver(fn func(p *Painter, r Rect)) *node { e.paintAfterFn = fn
 // ID returns the element's identity, stable from frame to frame.
 func (e *node) ID() uint64 { return e.id }
 
-// Bounds returns the element's box in the previous frame, in DIPs relative
-// to the window; it is empty for an element the previous frame lacked.
+// Bounds returns the previous frame's transformed bounding rectangle in
+// window DIPs; it is empty for an element the previous frame lacked.
+// LayoutBounds returns its box before visual transforms.
 func (e *node) Bounds() Rect {
 	if !e.hasState() {
 		return Rect{}
 	}
 	s := e.st
-	return Rect{s.x, s.y, s.w, s.h}
+	return transformRect(s.world, Rect{s.x, s.y, s.w, s.h})
 }
 
 // add appends a child.

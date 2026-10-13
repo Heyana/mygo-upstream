@@ -77,6 +77,8 @@ framework safely. Read it before changing anything under `internal/`.
 │   ├── surface/        the connection between a window and its native UI
 │   ├── scene/          display lists and glyph atlases, what renderers draw
 │   ├── text/           fonts, shaping, line breaking, editing, glyph rasterization
+│   ├── rope/           the persistent tree of text chunks text buffers keep
+│   ├── diff/           line and word diffs: histogram, Myers, git's indent heuristic
 │   ├── vec/            the coverage rasterizer of glyphs and paths
 │   ├── raster/         the CPU renderer of scenes
 │   ├── gpu/            the instances GPU renderers draw, and gputest/ for their tests
@@ -97,15 +99,21 @@ framework safely. Read it before changing anything under `internal/`.
 ├── plugins/            official plugins, each a Go package and its npm
 │                       package (@mygo-plugins/<name>) side by side: fetch,
 │                       websocket, sqlite; and Go only: updater, the update window,
-│                       a web page or native UI (updater/native), and
+│                       a web page or native UI (updater/native),
 │                       terminal, a view of native UI running programs with
-│                       libghostty-vt
-├── ui/                 native UI: views, layout, widgets, text editing, Tester
+│                       libghostty-vt, glass, and game, what games need
+│                       beyond what apps do (game/gamepad)
+├── ui/                 native UI: views, layout, widgets, text editing, Tester;
+│                       ui/chart: charts without a look, on ui's public API;
+│                       ui/editor: the code editor and the diff viewer
 ├── transfer/           immutable data items, representations, lazy providers and drag effects
+├── audio/              sound: players, the mixer, the output of each platform, WAV;
+│                       audio/vorbis and audio/mp3 decode Ogg Vorbis and MP3
 ├── cmd/mygo/           the CLI: init, generate, dev, build, doctor
 ├── examples/           hello, todo, frameless, native; counter-native, vibrancy,
-│                       effort-slider, flyout, menubar-flyout and gallery
-│                       (native UI); webview (web views in native UI)
+│                       effort-slider, flyout, menubar-flyout, piano, farm
+│                       and mayoi (games), code-editor and gallery (native
+│                       UI); webview (web views in native UI)
 ├── docs/               the user guides, the official plugins' pages
 │                       (plugins/), and this architecture guide
 └── website/            the website, with these docs: TanStack Start, prerendered
@@ -539,8 +547,13 @@ and APNs delivery remain external application configuration.
   runtime in the registry (`EdgeUpdate\ClientState\<channel>\EBWebView`)
   and calls `CreateWebViewEnvironmentWithOptionsInternal` of its
   `EmbeddedBrowserWebView.dll`, as `WebView2Loader.dll` does; a loader next to
-  the executable wins. The first window that shows a web page starts the
-  environment (`startEnvironment`), and fails without a runtime: windows
+  the executable wins. `internal/webview2` finds the runtime, for the backend
+  and for `mygo doctor`: a directory holding that library for this
+  architecture and the browser process `msedgewebview2.exe` at its root (the
+  library alone is the Edge browser's, whose environments fail with
+  `ERROR_NOT_SUPPORTED`), and EdgeUpdate's record of a runtime outlives its
+  files. The first window that shows a web page starts
+  the environment (`startEnvironment`), and fails without a runtime: windows
   that show native UI need none, so an app whose windows all do runs
   without WebView2. The environment and each controller are created
   asynchronously: window methods that need the webview wait in `pending`.
@@ -1125,6 +1138,39 @@ build` like mygo-runtime and released with the same version.
     The CLI puts them into apps
     (see the CLI's resources); other programs download theirs into the
     user's cache once, which packaged apps never do.
+- **game** has what games need beyond what apps do, opt-in, out of core
+  `ui`, on its public API only. `View` is a focusable box that keeps its
+  loop in `ui.Local`: its input handler gathers keys (by `PhysicalKey`),
+  buttons and wheel into the `Input` of the next step, and its draw
+  function asks for the next frame (`AnimationFrame`), adds the time since
+  the last frame (`Painter.Now`, at most a quarter of a second) and runs
+  the steps it covers before `Draw`. `Camera` is a `ui.Transform`, snapped
+  to device pixels when unturned.
+  Its package `gamepad`, like `audio`, stands apart from windows and the
+  main thread. One mutex guards the pads. `Pads` asks the platform's `scan` for
+  the devices connected at most once a second, handing it the devices it
+  has so that it reuses them, and a device that is gone, from a scan or
+  when read, disconnects its pad. `State` reads a device on the calling
+  goroutine into the standard layout (`State.Buttons` in the W3C's order,
+  `Axes` with y down):
+  - macOS: GameController.framework through purego's objc: `GCController`
+    `controllers` with an `extendedGamepad`, each element's `value` read
+    inside an autorelease pool, after `respondsToSelector:` for the buttons
+    older systems lack. The framework finds controllers on the main run
+    loop.
+  - Linux: evdev, opened non-blocking where `EVIOCGBIT` shows `BTN_SOUTH`;
+    reading drains the events waiting into key and axis arrays, with axes
+    scaled by `EVIOCGABS`'s range. Xbox controllers (Microsoft's and Valve's
+    vendor IDs, or the `xpad` driver) report X and Y under BTN_NORTH's and
+    BTN_WEST's codes, which are swapped back.
+  - Windows: XInput's four slots, through `XInputGetStateEx` (ordinal 100)
+    for the Guide button where it exists. Empty slots, slow to ask, are
+    asked only by scans.
+  - Browsers: `navigator.getGamepads()` by index, the standard mapping
+    matching the package's order.
+  Tests replace `scanDevices` with fake devices; on Linux, `TestEvdev`
+  (`MYGO_UINPUT=1`) makes uinput pads in the test container, and on macOS
+  `TestGameController` reads a controller from `controllerWithExtendedGamepad`.
 - **glass** is Liquid Glass for native UI, as macOS 26 and later draw it:
   `glass.Glass`, a `ui.Material` (interactive glass builds with its
   element, following its press with `Animate`, and paints itself grown
@@ -1253,11 +1299,14 @@ as in Tauri:
   restarts), so progress and a hidden button set before showing stick.
 - `WindowOptions.StateKey` (`window_state.go`) remembers a window's normal
   bounds and maximized/full screen state in `window-state.json` in
-  `PathUserData`, like Tauri's window-state plugin. The state is captured
+  `PathUserData`, like Tauri's window-state plugin, or in the app's
+  `WindowStateStore` (`App.SetWindowStateStore`), which loads all the
+  states once and saves them all, on the main thread. The state is captured
   300 ms after the last move/resize/state event (transitions resize the
   window on the way, and the normal bounds only change in the normal
-  state) and when the window closes; it is written when a window closes
-  and when the app quits. A saved window that would not show on any
+  state) and when the window closes; it is saved when a window closes
+  and when the app quits, if it changed, and kept for the next save when
+  saving fails. A saved window that would not show on any
   display keeps its size and is centered. `WindowOptions.Maximized` starts
   a window maximized: `zoom:` on macOS, `gtk_window_maximize` before
   mapping on Linux, `SW_SHOWMAXIMIZED` on the first show on Windows, where
@@ -1386,7 +1435,11 @@ as in Tauri:
   panel resigns key (macOS), on a press outside it or a broken grab, or
   as the compositor dismisses the popup (GTK, as `GtkMenu`), and as
   another window is activated (Windows), whose activating click its
-  owner eats (`MA_ACTIVATEANDEAT`), as menus' and WinUI's flyouts'. An
+  owner eats (`MA_ACTIVATEANDEAT`), as menus' and WinUI's flyouts'. On
+  macOS a local monitor eats a press on a panel's anchor, which only
+  closes it, as `NSPopover` eats one on its positioning rect: the press
+  would make the parent key, which closes the flyout before the release
+  clicks the anchor and opens it again. An
   Escape the content leaves closes a flyout too: native UI reports one
   no shortcut took (`routeKeys`, `surface.Conn.Escape`), and the bridge
   one no handler of the page cancelled (an `escape` message). `Flyout.Popover` shows one in an
@@ -1463,6 +1516,45 @@ object or user data. Native reads copy bytes so application data outlives
 native handles. See [Clipboard and drag data](data-transfer.md) for API and
 format mappings.
 
+## Audio (`audio`)
+
+Package `audio` is independent of windows and the main thread: it neither
+goes through `internal/platform` nor needs the app running. Players are
+voices (`audio/mixer.go`) under one mutex. Each reads frames from a source,
+an in-memory sound or a stream that a goroutine of its own decodes about a
+second ahead into a ring (`audio/source.go`); the mixer never waits on a
+stream, playing silence for one that is late. Voices resample to 48 kHz
+stereo with a Catmull-Rom spline at their rate times their speed, and ramp
+their gains (a 2×2 matrix of volume and pan) over 5 ms on every change,
+pause and resume. Looping happens in the source, so a loop has no gap; the
+voice counts frames past it modulo the length for `Position`.
+
+The output (`audio/output.go`) is a goroutine locked to one thread that
+opens the device when a voice starts, mixes 10 to 21 ms at a time and
+writes it with a call that blocks while the device holds enough, and
+closes the device after five idle seconds. Each platform gives one
+`openDevice`:
+
+- macOS: an Audio Queue of four buffers of 512 frames, started once all
+  hold audio; its callback, created once, hands buffers back over a channel.
+- Linux: `pa_simple_write` of PulseAudio's simple API (`libpulse-simple`,
+  which PipeWire serves too) with a 40 ms target, else ALSA's
+  `snd_pcm_writei` on `default`, both through purego.
+- Windows: WASAPI in shared mode, event driven, with a 40 ms buffer,
+  `AUTOCONVERTPCM` and the default-quality resampler; it compares the
+  default endpoint's ID every 500 ms and fails the write when it changed,
+  which reopens the device.
+- Browsers: an AudioWorklet from a Blob URL that queues three chunks and
+  posts a request whenever it used one; the output waits for a request
+  before mixing the next. One AudioContext serves the page; closing
+  suspends it, and the first pointer or key input resumes it.
+
+Where `openDevice` fails, a null device takes the frames on the wall
+clock and fails after two seconds, so the output tries the device again;
+`audio.Err` reports the failure. Formats register a magic prefix and a
+constructor as `image` does: WAV is built in, `audio/vorbis` and
+`audio/mp3` wrap pure Go decoders.
+
 ## Native UI (`ui`)
 
 The public API keeps one stable `*Context` per window. Child builders share
@@ -1526,7 +1618,9 @@ either.
   showing it (`RefreshRate`: the screen's `maximumFramesPerSecond`, GDK's
   `gdk_monitor_get_refresh_rate`, the display mode's frequency from
   `EnumDisplaySettingsW`); asks for a frame (`RequestFrame`: a
-  paused `CADisplayLink`, before macOS 14 an `NSTimer` at the display's
+  paused `CADisplayLink`, whose ticks draw frames that follow each other
+  themselves while a frame after a pause, or after a resize, draws when
+  AppKit displays the view, before macOS 14 an `NSTimer` at the display's
   rate, `gtk_widget_queue_draw` or a tick callback of GTK's frame clock,
   `InvalidateRect`); presents
   pixels drawn on the CPU (`PresentPixels`: a CGImage as the layer's
@@ -1687,6 +1781,14 @@ either.
   `SurfaceShown`, sent as some of the window shows again
   (`windowDidChangeOcclusionState:`), has a held animation go on from
   where the time puts it.
+  The window gaining or losing the keyboard focus draws a frame only when
+  the last frame read it (`windowFocus`, as a focus ring, a caret, a
+  selection's color or a focused text input's IME state do): a window
+  hiding or showing again draws nothing it would draw the same. Each
+  frame matters on macOS, where the Metal driver takes 30 to 45 MB of the
+  process's footprint ("owned unmapped (graphics)") for the first command
+  buffer encoding anything after a pause, and gives them back a second or
+  two after the last, as a bare Metal app does.
   A frame allocates next to nothing once the view builds what it built
   before: elements come from the context's arena, the default theme is
   copied for each pass, the states that pruning frees go to new elements
@@ -1702,6 +1804,59 @@ either.
   `MYGO_FRAME_STATS` set, frames slower than its threshold log how long
   each part took, which path drew them, what the process allocated and
   whether the collector ran (`ui/framestats.go`).
+- **Visual transforms and motion** (`ui/transform.go`, `ui/motion.go`). An
+  element's transform, 2D, or 3D in a 4×4 matrix (`mat4`) that it flattens
+  into its parent's plane as CSS's flat transform-style does, composes
+  with its ancestors after layout as a projective map
+  (`scene.Affine`, with G and H in perspective); boxes keep their original
+  layout space. Painting stores the composed transform on scene
+  operations and clips, and committing keeps it on the state for
+  inverse-mapped pointer input, carets, accessibility bounds, and overlays
+  attached to visual bounds. The CPU renderer inverse maps pixels for
+  transformed primitives and clips, and leaves what a projective map puts
+  behind the viewer. GPU builders retain local geometry and send three
+  transform rows with every instance; the vertex shaders project the quad
+  in homogeneous coordinates, so that local coordinates interpolate in
+  perspective, and fragment shaders integrate coverage in device space:
+  from screen derivatives for affine maps, and, in perspective, at the
+  CPU renderer's sample points, mapped back from the pixel's center
+  through the inverse. Nested
+  transformed or rounded clips use cached masks, independent of content
+  moving within them; hard clips in the drawing's coordinates evaluate on
+  the GPU. Backdrop effects map local samples into the frame. With a GPU,
+  every frame draws there, including resting changes to transformed content.
+  Metal retains wide colors under transforms. See
+  [Transforms](ui/transforms.md#rendering) for rendering details.
+- **Motion** (`ui/motion.go`): every animated value of an element
+  (`AnimateTo`, `Animate`, `AnimateWith`, `Spring`, `Jump`) is a `channel`
+  by key, with a value, a velocity and the time they hold for, moving
+  along a curve or a spring. Springs solve damped oscillators analytically
+  (`solveSpring`), so frames however far apart follow one path; a channel
+  samples its path at the frame's time before taking a new target or kind
+  of animation, so position and velocity survive interruptions (a curve's
+  velocity is its easing's slope). A delayed target waits in the channel
+  while the old path goes on. `Jump` sets values and derives a velocity
+  from successive ones; presses keep their last moves (`dragTrack`), in
+  the element's axes and the window's, for `DragVelocity` and
+  `DragEnded`. Keyframe sequences keep one sequence per
+  key with an explicit replay token. All ask for frames only while moving,
+  and end at their targets under reduced motion. Poses (`ui/pose.go`,
+  `AnimatePose`) are channels sampled as frames commit, into a transform
+  after the element's own (`poseM`) and a fade; frames that only paint
+  (`repaintFrame`) move the posed elements of the last frame built on
+  (`repose`) and set their subtrees' transforms again (`updateWorld`), so
+  they move without the view running. `Draggable` (`ui/draggable.go`)
+  keeps two channels of an offset (`dragRec`) that `showPose` adds to the
+  pose's translation: as the pointer drags the element, they hold where
+  the press's move in the window (`dragTrack`), mapped into the parent's
+  axes through the inverse of its last world transform, takes the offset
+  from where the press caught it, so they are the same in every build
+  pass of a frame; once let go, a spring starts at the release's velocity
+  for where `Snap` chooses from the projected throw, and goes on in frames
+  that only paint, the view building once more when it comes to rest. Content transitions (`ui/content.go`)
+  keep what an element showed, and fade or roll it into what it shows as
+  it paints, counting paintings (`engine.paints`) rather than frames
+  built, so frames that only paint move them on too.
 - **Transitions** (`ui/transition.go`) animate elements FLIP-style, after
   the layout of each frame and before `place` turns boxes into window
   coordinates: an element given a `Transition` keeps, by its ID, where the
@@ -1709,8 +1864,15 @@ either.
   goes from what it showed to a new place or size over the transition
   (parents first, as one resizing lays out its content anew at each size,
   which then moves itself). Moving with a parent or a scroll offset is no
-  change; resizing the window and reduced motion animate nothing. Colors
-  move as elements paint, after their `styleFn`. An element appears with
+  change; resizing the window animates nothing, and reduced motion only
+  fades and colors. Each moving component (position, size, opacity, and a
+  `Motion`'s scale and rotation) is a motion `channel`, so a spring keeps
+  its velocity through changes and a delay holds them. Colors move as
+  elements paint, after their `styleFn`. A `Match` moves an element
+  appearing where another of the same identity showed the frame before
+  (`rt.matched`, in window coordinates) after `place` (`animateMatches`),
+  laying it out anew at each box on the way, across parents and scroll
+  offsets. An element appears with
   its `Enter` only in a parent the frame before had. One no longer built,
   whose parent still is, goes with its `Exit` as an inert copy, laid out
   and painted under its siblings without taking room: frames that built
@@ -1950,10 +2112,13 @@ either.
   wrapped lines, and moves between whole graphemes in visual order.
   Selection gestures produce logical range sets: highlight, copy,
   replacement and undo use the same ranges, preserving unselected gaps.
-- **Indexed text storage.** `ui/text_buffer.go` is a persistent AVL tree of
+- **Indexed text storage.** `internal/rope` is a persistent AVL tree of
   bounded, owned UTF-8 chunks, summarized by byte, rune, UTF-16 and newline
-  counts. Edits copy affected chunks and tree paths; snapshots share other
-  chunks, and export can stream them. `TextInputBuffer`/`TextAreaBuffer` in
+  counts, and `rope.Text` the value reading lines, offsets and UTF-16
+  ranges from it, and lines a batch at a time; `ui/text_buffer.go` and the
+  code editor's buffers keep their texts in it. Edits copy affected chunks
+  and tree paths; snapshots share other chunks, and export can stream
+  them. `TextInputBuffer`/`TextAreaBuffer` in
   `textbuffer_input.go` bind those roots to the existing editing client.
   Native mutations publish a new root immediately, using a version check
   to preserve concurrent program edits. External root changes refresh the
@@ -1962,6 +2127,64 @@ either.
   absolute offsets. Paragraph layout and height caches remain with the
   widget; newline-count changes update those indexes. Full text is produced
   for explicit export/value queries, never as a binding update per edit.
+- **Code editor and diff viewer** (`ui/editor`, `internal/diff`). Package
+  `editor` is built on ui's public API, as `ui/chart` is, with four hooks
+  for it: `Painter.TextLine` paints a shaped line with a color per
+  cluster, `Painter.Visible` gives the clip to cull rows, `KeepFocus`
+  keeps the focus in the editor while its completions and find bar are
+  pressed, and `Access` describes its text to assistive technology only
+  while it reads the window. Its design follows Zed's:
+  - *Buffers* (`buffer.go`) keep a `rope.Text` and a log of the changes
+    of each version, in bytes and lines, old and new. Editors, the
+    highlighter and the diff follow a buffer by the versions they last
+    saw (`sync`): selections, folds, diagnostics and caches move through
+    the changes since, with a bias at insertions, so that one buffer is
+    shown by several editors and both sides of a diff. Undo keeps the
+    texts before and after each step, grouped while typing of one kind
+    by one editor goes on within 300 ms, and each step the selections of
+    the editor that made it.
+  - *Display* (`display.go`, `view.go`). Every line is a row, several
+    when it wraps, none when folded or collapsed by a diff; blocks are
+    rows between lines (a diff's deleted lines, spacers, separators,
+    annotations). A line's top is arithmetic on sparse sums: the extra
+    rows of wrapped lines in a Fenwick tree, and the heights of blocks
+    and hidden lines with their prefix sums; lines are found at a height
+    by bisection. Only the lines in view are laid out and shaped, kept
+    for two frames as Zed's line layout cache is. Wraps are measured with
+    cached advances of characters (monospaced ASCII is arithmetic) near
+    the view first, a frame's budget at a time, and estimated elsewhere.
+  - *Highlighting* (`syntax.go`). A `Highlighter` follows the buffer's
+    edits and gives tokens per line; the default tokenizes lines from the
+    state the line above ended in (`lexer.go`, `lexers.go`), keeping the
+    states, and after an edit goes on below it only until a line starts
+    as it did before. Optional interfaces give a parser's structure to
+    Select Larger, folding, brackets and indentation, so that tree-sitter
+    can plug in as a `Language.Highlighter` without the editor changing.
+    Brackets are matched by scanning lines a batch at a time
+    (`rope.Text.EachLine`), skipping strings and comments by their tokens,
+    and only lines holding brackets are tokenized for it.
+  - *Diffs* (`internal/diff`, `diffmodel.go`). Lines are interned and
+    compared with git's histogram algorithm, falling back to Myers' with
+    xdiff's cost limit, then slid by git's indent heuristic; changed
+    lines are paired by similarity and their words diffed, words one
+    character apart joined (Pierre's word-alt). An edit re-diffs only the
+    region of the hunks it touched, extended to the unchanged lines
+    around. The split view is two editors sharing their scroll, their
+    lines aligned by spacer blocks; the unified view one editor of the
+    new text, with blocks painting the deleted lines from a view of the
+    old one. Unchanged runs collapse into hidden spans under separator
+    blocks.
+  - *Parts* (`parts.go`, `diffparts.go`). The bars and popups around the
+    text (find, go to line, completions, hovers) and a diff's separators,
+    actions on changes and gutter button are elements the editor places
+    with the behavior they need, as ui's bases are: `shield` hands presses
+    on to what is inside them rather than to the editor's handler, and
+    `KeepFocus` keeps the typing in the editor. The app's render function
+    fills each, else the exported default, given a handle to the part's
+    state and actions (`FindBar`, `DiffSeparator`, ...), whose values
+    the editor reads back after the build, as a query typed. Separators
+    are built by the diff view across both sides, over the room their
+    blocks leave.
 - **Text selection** (`ui/textselection.go`). `Selectable` on a text
   selects that paragraph; on a container it gives its text descendants
   one selection. The window keeps endpoints as stable element IDs and
@@ -2439,12 +2662,27 @@ either.
   backdrop bound for the effect. Each renderer draws scenes offscreen for
   the tests of packages defining effects (`RenderOffscreen`,
   `NewOffscreen`).
+- **Canvases** (`scene.NewCanvas`, `ui.Canvas`) are images drawn from a
+  scene of their own. `Canvas.Draw` paints into its scene with a painter
+  of scale 1 sharing the window's atlases, and lists it in the frame's
+  `Scene.Canvases`, inner canvases first as they finish. Before a frame,
+  each renderer draws the canvases it lists or shows whose version its
+  texture does not hold (`Scene.EachCanvas`, those a canvas shows before
+  it), each with a builder of its own, into a texture in the frame's
+  format before effects: Metal into a BGRA8 render target in the frame's
+  command buffer, Direct3D 11 into a BGRA render target view (the dynamic
+  instance buffer, mapped with discard, serves all), OpenGL into a
+  framebuffer object, whose rows go up, so that image instances showing
+  it flip their texture coordinates (the samplers take source rectangles
+  either way round). A canvas's texture lives as long as the canvas
+  (`weak.Pointer`), not drawn again when shown. The CPU renderer draws
+  canvases into their `Pix` (`PixVersion`).
   Near square corners, coverage is exact, the area of a pixel
   inside the box, so lines thinner than a pixel cover as much as they
   should, as text decorations need. A fill's border widths travel in its
   texture rectangle, which fills do not use, and a glyph's gamma ratios
-  and contrast in its radii, so every instance stays eleven float4s. The
-  shader writes a second color, the source's alpha of each channel, and
+  and contrast in its radii. Each instance is thirteen float4s, including
+  its two affine rows. The shader writes a second color, the source's alpha of each channel, and
   renderers blend with it (dual-source blending): it is the color's alpha
   but for subpixel glyphs, whose subpixels cover each channel by its own.
   OpenGL ES without `EXT_blend_func_extended` blends the mean of their
@@ -2456,7 +2694,9 @@ either.
     generated file records the SHA-256 of the source it came from, line
     endings aside (`gpu.SourceSum`), as Metal's does: bytecode older than
     `shader.hlsl` falls back to compiling that with the same DLL, which
-    Windows has, and its test fails. It draws into a flip-model swap
+    Windows has, and its test fails. Both compilation paths enable IEEE
+    strictness with optimization, avoiding a native compiler optimizer crash
+    on transformed coverage sampling. It draws into a flip-model swap
     chain on the surface's window, or, over a material, one for
     DirectComposition shown on it, with WARP when no hardware device
     works. At most one frame waits ahead of the screen, not DXGI's three,
@@ -2478,16 +2718,23 @@ either.
     source until it has cached it; a library older than `shader.metal`
     falls back to that, and its test fails. It draws into a CAMetalLayer
     it adds to the surface view's layer. The command queue, shaders,
-    sampler and placeholder texture are made on demand. Its frames
-    present with the Core Animation transaction (`presentsWithTransaction`) on
-    macOS, so a live resize shows no stretched frames. iOS uses asynchronous
-    command-buffer presentation and the default three drawables, paced by
-    `CADisplayLink`; transactional presentation with two drawables caused
-    consecutive GPU-completion and drawable waits on the main thread.
-    Each frame waits for the GPU to finish
-    the last before it updates the textures and the instance buffer the
-    last read; the desktop uses two drawables to spare memory.
-    Two seconds after the last frame, as the
+    sampler and placeholder texture are made on demand. A frame that
+    changes the layer (its size, scale or pixel format), or shows web
+    views, which move in the window's transaction, presents with the Core
+    Animation transaction (`presentsWithTransaction`), so a live resize
+    shows no stretched frames; the others present as soon as the GPU has
+    them (`presentDrawable:`), sparing a pass of AppKit's display cycle
+    and a commit of the transaction each: an animation at 120 Hz takes
+    about half the main thread's time it would. A frame presented so
+    that waited for its drawable, as the display held both until its next
+    refresh, has the next skip a refresh (`Behind`, at most once a
+    second), or the frames after would wait as long, most of each
+    refresh, blocking the main thread. Each frame waits for the GPU to
+    finish the last before it updates the textures and the instance
+    buffer the last read, so two drawables do rather than the three a
+    layer makes while a window animates. iOS retains three drawables and
+    asynchronous command-buffer presentation, paced by CADisplayLink;
+    presentation hooks continue reporting the first frame. Two seconds after the last frame, as the
     driver frees its own memory of frames, a timer shrinks the drawables,
     which frees all but the one shown, until the next frame makes them
     again, and releases GPU instance buffers, atlas/image textures and
@@ -2750,7 +2997,9 @@ renderer's (`gputest.Compare`).
   to the main package, with `//go:embed all:mygo_frontend` and a call to
   `SetFrontend`, and maps every `frontendDist` file into that virtual
   directory, so the frontend may live anywhere. macOS targets become `.app`
-  bundles (Info.plist, `.icns` rendered in pure Go), signed with
+  bundles (Info.plist, `.icns` rendered in pure Go, and with `macos.icon`
+  an `Assets.car`, as it is or compiled from an Icon Composer `.icon` by
+  `xcrun actool`), signed with
   `macos.signingIdentity` (hardened runtime and timestamp for real
   identities, ad hoc by default); `darwin/universal` combines both
   architectures with a pure-Go fat-binary writer. Linux gets a `.desktop`
@@ -2776,7 +3025,7 @@ renderer's (`gputest.Compare`).
   links inside them are copied as links, permissions are kept. Installed
   paths must be unique ignoring case (listed resources never merge), and
   top-level names must not replace the packaging's own files
-  (`AppIcon.icns`, the executable, the `.desktop` entry). Code
+  (`AppIcon.icns`, `Assets.car`, the executable, the `.desktop` entry). Code
   among them is signed before the app (`signNestedCode`), since
   `codesign --deep` only covers code directories and notarization rejects
   unsigned code: Mach-O files, then the bundles holding them, deepest
@@ -3120,5 +3369,7 @@ which npm allows only for packages that exist: the first release uses an
 | native UI surface | layer-backed NSView, frames from `CADisplayLink` (a timer at the display's rate before macOS 14), input methods through NSTextInputClient | GtkGLArea (GtkDrawingArea without a GPU), GtkIMMulticontext | `MyGoSurface` child window, IMM32 |
 | native UI data drags | NSDraggingSession, NSPasteboardItemDataProvider, NSDraggingDestination | GTK drag contexts, MIME selections, text/uri-list | OLE IDataObject, IDropSource, IDropTarget, Shell drag images |
 | native UI accessibility | `NSAccessibilityElement` subclasses | ATK objects (GObject types registered through purego), bridged to AT-SPI by GTK | UI Automation fragments (COM objects; assembly thunks for the methods taking doubles) |
-| native UI rendering | Metal, into a CAMetalLayer presenting with the Core Animation transaction | OpenGL 3.3 or ES 3.0 in the GtkGLArea's render signal; on the CPU, painted with cairo, where OpenGL runs on the CPU | Direct3D 11 (WARP without a GPU), flip-model swap chain |
+| native UI rendering | Metal, into a CAMetalLayer presenting as soon as drawn, or with the Core Animation transaction for frames that resize it or show web views | OpenGL 3.3 or ES 3.0 in the GtkGLArea's render signal; on the CPU, painted with cairo, where OpenGL runs on the CPU | Direct3D 11 (WARP without a GPU), flip-model swap chain |
 | web views in native UI | WKWebView in a clip view under the surface; `hitTest:` lets the pointer through | WebKitWebView in a `GtkLayout` under the area in a `GtkOverlay`; an input shape lets the pointer through | WebView2 composition controller in a DirectComposition target under the frames'; the surface sends it the mouse |
+| audio output | Audio Queue on the default output | PulseAudio simple API (PipeWire too), else ALSA `default` | WASAPI shared mode, reopened when the default output changes |
+| gamepads | GameController.framework, extended gamepad profile | evdev, the kernel's gamepad layout, Xbox's X and Y swapped back | XInput, four slots, Guide by `XInputGetStateEx` |

@@ -219,3 +219,11 @@ the right over the page it leaves, and back up from the left; others fade
 in. With less motion asked of the desktop, all fade, and
 `router.Transition = ui.TransitionNone` shows them at once. The page going
 away takes neither the pointer nor the keyboard as it slides.
+
+`router.Animation` sets how pages move, as a spring or a curve (see
+[Motion](motion.md)), in place of easing out over 250 ms as they slide and
+150 ms as they fade:
+
+```go
+router.Animation = &ui.Snappy
+```

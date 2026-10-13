@@ -1,6 +1,9 @@
 package ui
 
-import "github.com/egoist/mygo/transfer"
+import (
+	"github.com/egoist/mygo/internal/scene"
+	"github.com/egoist/mygo/transfer"
+)
 
 // Elements drag values to others within a window: Drag makes an element
 // the source of a value, which a press moving a few DIPs starts dragging,
@@ -56,10 +59,16 @@ func (e *node) dragFrom(value func() any) *node {
 	return e
 }
 
-// Dragging reports whether the element is dragging its value (Drag).
+// Dragging reports whether the element is dragging its value (Drag), or
+// the pointer is dragging the element (Draggable).
 func (e *node) Dragging() bool {
-	d := e.c.rt.drag
-	return d != nil && d.src == e.id && !d.canceled
+	if !e.hasState() {
+		return false
+	}
+	if d := e.c.rt.drag; d != nil && d.src == e.id && !d.canceled {
+		return true
+	}
+	return e.st.pressed && !e.disabled() && e.st.dragRec.dragged(e.c.rt, e.st)
 }
 
 // Drop makes e take values of type T dragged within the window (Element.Drag)
@@ -112,12 +121,18 @@ func (rt *engine) valueTarget(x, y float32, value any) uint64 {
 // far enough, and follows the element under it.
 func (rt *engine) dragMove(x, y float32) {
 	s := rt.pressed
-	if s == nil || rt.pressButton != 0 || (s.dragValue == nil && s.dragFn == nil && s.dataSource == nil) {
+	if s == nil || rt.pressButton != 0 {
 		return
+	}
+	if !s.drags() {
+		if s = rt.handPress(x, y); s == nil {
+			return
+		}
 	}
 	d := rt.drag
 	if d == nil {
-		dx, dy := x-(s.x+s.pressX), y-(s.y+s.pressY)
+		px, py := s.world.Point(s.x+s.pressX, s.y+s.pressY)
+		dx, dy := x-px, y-py
 		if dx*dx+dy*dy < dragStart*dragStart {
 			return
 		}
@@ -165,6 +180,54 @@ func (rt *engine) dragMove(x, y float32) {
 	}
 	d.over = rt.valueTarget(x, y, d.value)
 	rt.requestFrame()
+}
+
+// drags reports whether the element drags a value (Drag, a list's rows,
+// DragData).
+func (s *state) drags() bool {
+	return s.dragValue != nil || s.dragFn != nil || s.dataSource != nil
+}
+
+// pressDragger returns the element around target, the one pressed, that
+// drags a value, as a list's row around a button, when target only takes
+// clicks: one taking the pointer's moves (a text, a slider, a value of its
+// own to drag) keeps them.
+func pressDragger(rt *engine, chain []uint64, target *state) uint64 {
+	if target.drags() || target.flags&(flagEditable|flagSelectable|flagDraggable|flagTrackPointer) != 0 {
+		return 0
+	}
+	inside := false
+	for _, id := range chain {
+		s := rt.states[id]
+		switch {
+		case s == nil:
+		case s == target:
+			inside = true
+		case inside && s.flags&flagDisabled == 0 && s.drags():
+			return id
+		}
+	}
+	return 0
+}
+
+// handPress gives the press to the element around the one pressed that
+// drags a value, once the pointer moves as far as starts a drag: the
+// element pressed has no click then. It returns that element, or nil.
+func (rt *engine) handPress(x, y float32) *state {
+	s, a := rt.pressed, rt.states[rt.pressDragger]
+	if a == nil || rt.drag != nil || !a.drags() {
+		return nil
+	}
+	px, py := s.world.Point(s.x+s.pressX, s.y+s.pressY)
+	if dx, dy := x-px, y-py; dx*dx+dy*dy < dragStart*dragStart {
+		return nil
+	}
+	rt.pressed, rt.pressDragger = a, 0
+	s.pressed = false
+	a.pressed, a.pressMods, a.pressPending = true, s.pressMods, true
+	a.pressX, a.pressY = a.local(px, py)
+	a.drag.reset(rt.now(), px, py)
+	return a
 }
 
 // dragEnd drops the value dragged on the element taking it under the
@@ -216,7 +279,8 @@ func (rt *engine) dragScroll() {
 			continue
 		}
 		var dy float32
-		switch top, bottom := rt.pointerY-s.vy, s.vy+s.vh-rt.pointerY; {
+		_, y := s.local(rt.pointerX, rt.pointerY)
+		switch top, bottom := y, s.h-y; {
 		case top < edge:
 			dy = -(edge - top) / 2
 		case bottom < edge:
@@ -239,8 +303,14 @@ func (rt *engine) paintDrag(p *Painter, w, h float32) {
 		return
 	}
 	e := d.elem
-	dx, dy := rt.pointerX-d.offX-e.x, rt.pointerY-d.offY-e.y
-	shift(e, dx, dy)
+	px, py := e.world.Point(e.x+d.offX, e.y+d.offY)
+	dx, dy := rt.pointerX-px, rt.pointerY-py
+	affine := hasVisualTransform(e)
+	if affine {
+		shiftVisual(e, dx, dy)
+	} else {
+		shift(e, dx, dy)
+	}
 	saved, savedClip, dimmed := p.opacity, p.clip, e.opacitySet
 	p.opacity, p.clip, e.opacitySet = 0.75, Rect{0, 0, w, h}, false
 	p.element(e)
@@ -257,7 +327,37 @@ func (rt *engine) paintDrag(p *Painter, w, h float32) {
 		p.RichText(x+(bw-tw)/2, y+2, 0, label)
 	}
 	p.opacity, p.clip, e.opacitySet = saved, savedClip, dimmed
-	shift(e, -dx, -dy)
+	if affine {
+		restoreVisual(e)
+	} else {
+		shift(e, -dx, -dy)
+	}
+}
+
+func hasVisualTransform(e *node) bool {
+	if e.world.Set {
+		return true
+	}
+	for ch := e.first; ch != nil; ch = ch.next {
+		if hasVisualTransform(ch) {
+			return true
+		}
+	}
+	return false
+}
+
+func restoreVisual(e *node) {
+	e.world = e.st.world
+	for ch := e.first; ch != nil; ch = ch.next {
+		restoreVisual(ch)
+	}
+}
+
+func shiftVisual(e *node, dx, dy float32) {
+	e.world = scene.Translation(dx, dy).Mul(e.world)
+	for ch := e.first; ch != nil; ch = ch.next {
+		shiftVisual(ch, dx, dy)
+	}
 }
 
 func itoa(n int) string {

@@ -41,6 +41,18 @@ func TestKeyOf(t *testing.T) {
 	}
 }
 
+func TestCodeKey(t *testing.T) {
+	// The key by position, whatever the layout types: ы is on S.
+	for code, want := range map[string]platform.Key{
+		"KeyS": platform.KeyS, "Digit1": platform.Key1, "Semicolon": platform.KeySemicolon,
+		"IntlBackslash": platform.KeyUnknown, "": platform.KeyUnknown,
+	} {
+		if got := codeKey(code); got != want {
+			t.Errorf("codeKey(%q) = %v, want %v", code, got, want)
+		}
+	}
+}
+
 func TestAccelText(t *testing.T) {
 	for _, tc := range []struct {
 		accel string

@@ -28,6 +28,7 @@ package gpu
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"unsafe"
 
@@ -50,7 +51,7 @@ func GoBytes(name string, b []byte) string {
 }
 
 // Instance is the data of one quad, in device pixels, as the shaders read
-// it: eleven float4s.
+// it: thirteen float4s.
 type Instance struct {
 	// Rect is x, y, width, height; Radii the corners' radii (top-left,
 	// top-right, bottom-right, bottom-left), negative for continuous
@@ -60,7 +61,8 @@ type Instance struct {
 	// box casting a shadow, or a glyph's contrast and thin boost in Inner[0]
 	// and Inner[1].
 	Rect, Radii, Inner [4]float32
-	// Color and Color2 (a gradient's end) and Border are straight RGBA.
+	// Color and Color2 (a gradient's end) and Border are straight RGBA;
+	// Color tints an image (white for none).
 	Color, Color2, Border [4]float32
 	// Grad holds a gradient's start and end points, or the stripes' unit
 	// vector across them, width and period; UV the texture rectangle,
@@ -78,9 +80,16 @@ type Instance struct {
 	// image, 5 subpixel glyph, 6 effect); 1 for a dashed border, a
 	// grayscale image or an inner shadow, whose box is in Rect and Radii
 	// and the hole it leaves in UV and Inner (none when empty); the
-	// shadow's sigma (0 for none), the paint (scene.Paint) or the size of
-	// the squares an effect's backdrop averages; and the opacity.
+	// shadow's sigma (0 for none), the paint (scene.Paint), 1 for an image
+	// sampled at its nearest texel, or the size of the squares an effect's
+	// backdrop averages; and the opacity.
 	Params [4]float32
+	// Transform rows map local pixels to the frame. Transform0.w enables
+	// transformed antialiasing, Transform1.w selects a cached clip mask.
+	// Transform2 holds the projective row's g and h, the frame point of
+	// local (x, y) being Transform0's and Transform1's dot products with
+	// (x, y, 1) over g*x + h*y + 1: shaders interpolate in perspective.
+	Transform0, Transform1, Transform2 [4]float32
 }
 
 // InstanceSize is the size of an Instance in bytes.
@@ -100,6 +109,8 @@ type Batch struct {
 	Scissor      Scissor
 	// Image is the renderer's texture of the batch's image, or 0.
 	Image uintptr
+	// ClipMask is a cached nested clip texture, sampled in frame coordinates.
+	ClipMask uintptr
 	// Effect is the effect of the batch's one instance, drawn with a
 	// pipeline of its own, and Backdrop, unless 0, 1 + the index in
 	// Builder.Backdrops of its backdrop, which the renderer reads before
@@ -122,6 +133,16 @@ type Builder struct {
 	// drawables do; without it, their nearest sRGB colors.
 	Wide  bool
 	stack []clip
+	// encloses tells, for each op of the scene, that it pushes a clip with
+	// a transformed op or glyph inside it.
+	encloses     []bool
+	pushes       []int
+	clipShapes   []scene.ClipShape
+	maskSlots    []clipMaskSlot
+	maskUsed     int
+	frame        uint64
+	imageTexture func(*scene.Image) uintptr
+	preparedMask uintptr
 }
 
 // Pass is what a pass computing a backdrop reads, the layout of the
@@ -168,12 +189,27 @@ type clip struct {
 	radii   [4]float32
 	bounds  scene.Rect
 	scissor Scissor
+	shape   scene.ClipShape
+	// moved tells that this clip or one it is nested in is transformed,
+	// which the scissor rectangles don't follow.
+	moved       bool
+	masked      bool
+	maskSlot    int
+	maskTexture uintptr
 }
 
-// Build turns the operations of s into Instances and Batches. image
-// returns the renderer's texture of an image, uploading it when new or
-// changed, or 0 to leave the image out.
-func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
+// Build turns a scene directly into GPU instances, retaining local geometry
+// and composing transforms in the vertex shader. Nested affine clips use
+// cached masks; stationary clipping never rasterizes again as content moves.
+// A clip is masked only when it is transformed, nested in a transformed
+// clip, or rounded (or masked) with transformed content inside: the others
+// cut in the shader as in a scene without transforms.
+func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene.Scene {
+	b.markEnclosing(s)
+	b.imageTexture = image
+	b.maskUsed = 0
+	b.frame++
+	b.clipShapes = b.clipShapes[:0]
 	b.Instances = b.Instances[:0]
 	b.Batches = b.Batches[:0]
 	b.Backdrops = b.Backdrops[:0]
@@ -185,10 +221,18 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
 		switch op.Kind {
 		case scene.OpPushClip:
 			top := b.stack[len(b.stack)-1]
-			bounds := top.bounds.Intersect(op.Rect)
+			bounds := top.bounds.Intersect(op.Transform.Bounds(op.Rect))
 			// The innermost clip shapes its edges in the shader, the
 			// others cut with the scissor rectangle.
-			c := clip{rect: op.Rect, radii: scene.Corners(op.Rect, op.Radii, op.Continuous), bounds: bounds}
+			c := clip{rect: op.Rect, radii: scene.Corners(op.Rect, op.Radii, op.Continuous), bounds: bounds,
+				shape: scene.ClipShape{Rect: op.Rect, Radii: op.Radii, Transform: op.Transform, Continuous: op.Continuous}, maskSlot: -1}
+			c.moved = top.moved || op.Transform.Set
+			c.masked = c.moved || b.encloses[i] && (top.masked || c.radii != [4]float32{})
+			if c.masked {
+				c.maskSlot = b.maskUsed
+				b.maskUsed++
+			}
+			b.clipShapes = append(b.clipShapes, c.shape)
 			if bounds.W > 0 && bounds.H > 0 {
 				c.scissor = Scissor{int32(math.Floor(float64(bounds.X))), int32(math.Floor(float64(bounds.Y))),
 					int32(math.Ceil(float64(bounds.X + bounds.W))), int32(math.Ceil(float64(bounds.Y + bounds.H)))}
@@ -197,6 +241,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
 		case scene.OpPopClip:
 			if len(b.stack) > 1 {
 				b.stack = b.stack[:len(b.stack)-1]
+				b.clipShapes = b.clipShapes[:len(b.clipShapes)-1]
 			}
 		case scene.OpFill:
 			if op.Rect.Empty() {
@@ -221,7 +266,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
 				Color: wideColor(w, scene.WideColor, op.Color), Color2: wideColor(w, scene.WideColor2, op.Color2), Border: wideColor(w, scene.WideBorder, op.BorderColor), Grad: op.Gradient,
 				UV:     bw,
 				Params: [4]float32{0, dashed, float32(op.Paint), opacity(op.Opacity)},
-			}, 0)
+			}, 0, op.Transform)
 		case scene.OpShadow:
 			if op.Inset {
 				// The box in Rect, the hole in UV and Inner, which an
@@ -240,7 +285,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
 				if !op.Rect.Empty() {
 					in.UV, in.Inner = rect(op.Rect), scene.Corners(op.Rect, op.Radii, op.Continuous)
 				}
-				b.add(in, 0)
+				b.add(in, 0, op.Transform)
 				continue
 			}
 			if op.Rect.Empty() {
@@ -257,7 +302,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
 			if !op.Cast.Empty() {
 				in.UV, in.Inner = rect(op.Cast), scene.Corners(op.Cast, op.CastRadii, op.Continuous)
 			}
-			b.add(in, 0)
+			b.add(in, 0, op.Transform)
 		case scene.OpGlyphs:
 			grad := op.Paint == scene.PaintLinear || op.Paint == scene.PaintOklab
 			var c1, c2 [4]float32
@@ -296,7 +341,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
 					in.Color, in.Color2, in.Grad = c1, c2, op.Gradient
 					in.Params[2], in.Params[3] = float32(op.Paint), opacity(op.Opacity)
 				}
-				b.add(in, 0)
+				b.add(in, 0, op.Transform.Mul(g.Transform))
 			}
 		case scene.OpEffect:
 			if !op.Rect.Empty() && int(op.Start) < len(s.Effects) && s.Effects[op.Start].Effect != nil {
@@ -316,33 +361,77 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) {
 				continue
 			}
 			iw, ih := float32(img.W), float32(img.H)
-			gray := float32(0)
+			gray, nearest := float32(0), float32(0)
 			if op.Grayscale {
 				gray = 1
+			}
+			if op.Pixelated {
+				nearest = 1
+			}
+			tint := [4]float32{1, 1, 1, 1}
+			if op.Color != (scene.Color{}) {
+				tint = straight(op.Color)
 			}
 			b.add(Instance{
 				Rect:   rect(op.Rect),
 				Radii:  scene.Corners(op.Rect, op.Radii, op.Continuous),
+				Color:  tint,
 				UV:     [4]float32{op.Src.X / iw, op.Src.Y / ih, (op.Src.X + op.Src.W) / iw, (op.Src.Y + op.Src.H) / ih},
-				Params: [4]float32{4, gray, 0, opacity(op.Opacity)},
-			}, tex)
+				Params: [4]float32{4, gray, nearest, opacity(op.Opacity)},
+			}, tex, op.Transform)
+		}
+	}
+
+	b.dropIdleMasks(idleMaskBytes)
+	b.imageTexture = nil
+	return s
+}
+
+// markEnclosing sets b.encloses for the ops of s.
+func (b *Builder) markEnclosing(s *scene.Scene) {
+	b.encloses = slices.Grow(b.encloses[:0], len(s.Ops))[:len(s.Ops)]
+	clear(b.encloses)
+	b.pushes = b.pushes[:0]
+	for i := range s.Ops {
+		op := &s.Ops[i]
+		if op.Kind == scene.OpPopClip {
+			if n := len(b.pushes); n > 0 {
+				b.pushes = b.pushes[:n-1]
+			}
+			continue
+		}
+		transformed := op.Transform.Set
+		if op.Kind == scene.OpGlyphs {
+			for _, g := range s.Glyphs[op.Start:op.End] {
+				transformed = transformed || g.Transform.Set
+			}
+		}
+		// Every clip open around it encloses it, from the innermost out to
+		// the first already marked, whose own are.
+		for j := len(b.pushes) - 1; transformed && j >= 0 && !b.encloses[b.pushes[j]]; j-- {
+			b.encloses[b.pushes[j]] = true
+		}
+		if op.Kind == scene.OpPushClip {
+			b.pushes = append(b.pushes, i)
 		}
 	}
 }
 
+// Release frees the retained clipping resources and instance buffers.
+func (b *Builder) Release() { *b = Builder{} }
+
 // add appends an instance within the current clip, starting a batch when
 // the scissor rectangle or the image changes, or after an effect's.
-func (b *Builder) add(in Instance, image uintptr) {
+func (b *Builder) add(in Instance, image uintptr, m scene.Affine) {
 	cur := &b.stack[len(b.stack)-1]
-	if cur.scissor.Empty() {
+	if !b.prepare(&in, m, cur) {
 		return
 	}
-	in.Clip = rect(cur.rect)
-	in.ClipRadii = cur.radii
 	n := len(b.Batches)
 	if n == 0 || b.Batches[n-1].Scissor != cur.scissor || b.Batches[n-1].Effect != nil || b.Batches[n-1].Hole ||
+		b.Batches[n-1].ClipMask != b.preparedMask ||
 		(image != 0 && b.Batches[n-1].Image != 0 && b.Batches[n-1].Image != image) {
-		b.Batches = append(b.Batches, Batch{Start: len(b.Instances), Scissor: cur.scissor, Image: image})
+		b.Batches = append(b.Batches, Batch{Start: len(b.Instances), Scissor: cur.scissor, Image: image, ClipMask: b.preparedMask})
 		n++
 	} else if image != 0 {
 		b.Batches[n-1].Image = image
@@ -366,9 +455,12 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 		Clip: rect(cur.rect), ClipRadii: cur.radii,
 		Params: [4]float32{6, 0, 1, opacity(op.Opacity)},
 	}
-	batch := Batch{Start: len(b.Instances), Count: 1, Scissor: cur.scissor, Effect: fx.Effect}
+	if !b.prepare(&in, op.Transform, cur) {
+		return
+	}
+	batch := Batch{Start: len(b.Instances), Count: 1, Scissor: cur.scissor, Effect: fx.Effect, ClipMask: b.preparedMask}
 	if fx.Effect.Backdrop {
-		bk := scene.BackdropOf(op.Rect, fx.Blur, s.Width, s.Height)
+		bk := scene.BackdropOf(op.Transform.Bounds(op.Rect), fx.Blur, s.Width, s.Height)
 		if bk.Area.Empty() {
 			return
 		}
@@ -386,16 +478,17 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 // an opaque fill, whose coverage the renderers take away.
 func (b *Builder) addHole(op *scene.Op) {
 	cur := &b.stack[len(b.stack)-1]
-	if cur.scissor.Empty() {
-		return
-	}
 	in := Instance{
 		Rect: rect(op.Rect), Radii: scene.Corners(op.Rect, op.Radii, op.Continuous),
-		Color: [4]float32{0, 0, 0, 1}, Clip: rect(cur.rect), ClipRadii: cur.radii,
+		Color:  [4]float32{0, 0, 0, 1},
 		Params: [4]float32{0, 0, float32(scene.PaintSolid), opacity(op.Opacity)},
 	}
-	if n := len(b.Batches); n == 0 || !b.Batches[n-1].Hole || b.Batches[n-1].Scissor != cur.scissor {
-		b.Batches = append(b.Batches, Batch{Start: len(b.Instances), Scissor: cur.scissor, Hole: true})
+	if !b.prepare(&in, op.Transform, cur) {
+		return
+	}
+	if n := len(b.Batches); n == 0 || !b.Batches[n-1].Hole || b.Batches[n-1].Scissor != cur.scissor ||
+		b.Batches[n-1].ClipMask != b.preparedMask {
+		b.Batches = append(b.Batches, Batch{Start: len(b.Instances), Scissor: cur.scissor, Hole: true, ClipMask: b.preparedMask})
 	}
 	b.Instances = append(b.Instances, in)
 	b.Batches[len(b.Batches)-1].Count++

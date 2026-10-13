@@ -246,6 +246,9 @@ func (c *context) rekey(e *node, k any) {
 	}
 	id := keyedID(parent, k)
 	rt := c.rt
+	if id != e.id {
+		rt.unlook(e.st)
+	}
 	st, built := rt.lookState(id)
 	if built && id != e.id {
 		// Another element of the pass has the key under the same parent.
@@ -357,6 +360,18 @@ func (c *context) Invalidate() { c.rt.host.invalidate() }
 // Painter.AnimationFrame instead, whose frames do not build the view.
 func (c *context) AnimationFrame() { c.rt.animating = true }
 
+// DisableAnimations makes the values that animate in this frame
+// (AnimateTo, Animate, Spring), the element transitions and the pages of
+// routers go to their targets at once, as SwiftUI's disablesAnimations:
+// for a change that should not show as motion, as restoring a window's
+// state or jumping to a search result. Call it before building what
+// changes.
+func (c *context) DisableAnimations() { c.rt.instantFrame = c.rt.frame }
+
+// instant reports whether this frame shows changes at once
+// (DisableAnimations).
+func (rt *engine) instant() bool { return rt.instantFrame == rt.frame && rt.frame != 0 }
+
 // After asks for another frame after d, for something that changes with
 // time, such as a clock.
 func (c *context) After(d time.Duration) { c.rt.scheduleAt(c.now.Add(d)) }
@@ -443,10 +458,18 @@ type state struct {
 	pendingSubmit  bool
 	noticeQueued   bool
 
-	id   uint64
-	seen uint64
-	pass int    // the pass of the frame that built it last
-	born uint64 // the frame that first built the element
+	world     scene.Affine
+	clips     bool
+	clipRect  Rect
+	clipRadii [4]float32
+	id        uint64
+	seen      uint64
+	pass      int    // the pass of the frame that built it last
+	born      uint64 // the frame that first built the element
+	// lookedSeen and lookedPass are seen and pass before the last
+	// lookup (lookState), 0 for a state it created.
+	lookedSeen uint64
+	lookedPass int
 	// The element's box and its visible part in the last frame.
 	x, y, w, h     float32
 	vx, vy, vw, vh float32
@@ -475,7 +498,16 @@ type state struct {
 	pressX, pressY float32
 	dragX, dragY   float32
 	pressed        bool
-	pressPending   bool // the press began since the last build pass
+	// drag follows the press's moves; released tells that it ended since
+	// the last frame, going at releaseVX and releaseVY in the element's
+	// axes, releaseWX and releaseWY in the window's.
+	drag                 dragTrack
+	released             bool
+	releaseVX, releaseVY float32
+	releaseWX, releaseWY float32
+	pressPending         bool // the press began since the last build pass
+	// dragRec is what Draggable keeps of the element from frame to frame.
+	dragRec *dragRec
 
 	// scrollX and scrollY are float64, as the content a List scrolls
 	// may be taller than float32 counts to a fraction of a DIP.
@@ -534,6 +566,11 @@ type state struct {
 	valueBinding any
 	locals       map[any]any
 	anims        map[any]*anim
+	motions      map[any]*channel
+	colorMotions map[any]*colorMotion
+	crec         *contentRec
+	pose         *poseRec
+	sequences    map[any]*sequence
 	shortcuts    []shortcut
 	delivered    []shortcut
 
@@ -594,11 +631,31 @@ func (rt *engine) lookState(id uint64) (s *state, built bool) {
 		built = s.seen == rt.frame && s.pass == rt.pass
 	}
 	s.rt = rt
+	s.lookedSeen, s.lookedPass = s.seen, s.pass
 	s.seen, s.pass = rt.frame, rt.pass
 	// What the element drags and takes, as this pass asks.
 	s.dragValue, s.dragFn, s.accepts = nil, nil, nil
 	s.dataSource, s.dataTarget = nil, nil
 	return s, built
+}
+
+// unlook undoes the lookup of s by an element that Key gave another
+// identity: creation looked up its place among its siblings, which is not
+// its own. A state the lookup created goes at once, so that keyed elements
+// keep none behind them, nor allocate one every frame. One that was there
+// before, as that of a popover that just closed in the place, is left as
+// the lookup found it: pruning retires it, giving the focus back for an
+// overlay, unless another element of the pass built it.
+func (rt *engine) unlook(s *state) {
+	if s.lookedSeen != 0 {
+		s.seen, s.pass = s.lookedSeen, s.lookedPass
+		return
+	}
+	delete(rt.states, s.id)
+	*s = state{}
+	if len(rt.free) < maxFree {
+		rt.free = append(rt.free, s)
+	}
 }
 
 // textSystem is the shared text system.

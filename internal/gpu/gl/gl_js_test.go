@@ -73,6 +73,15 @@ func TestWebGLDrawsAsTheCPURenderer(t *testing.T) {
 				}
 				gputest.Compare(t, "webgl", read(), s.Width*4, s)
 			}
+			for name, s := range map[string]*scene.Scene{"webgl-affine": gputest.TransformedScene(), "webgl-perspective": gputest.PerspectiveScene()} {
+				if !dual {
+					withoutSubpixelGlyphs(s)
+				}
+				if err := r.Render(s); err != nil {
+					t.Fatal(err)
+				}
+				gputest.Compare(t, name, read(), s.Width*4, s)
+			}
 		})
 	}
 }

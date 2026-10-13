@@ -90,6 +90,10 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   smoothly as the layout changes, and come and go.
 - [Startup](startup.md): a custom startup view, first-frame presentation,
   application readiness and an accessible crossfade to content.
+- [Motion](motion.md): springs that keep their velocity, curves, delays,
+  values thrown by the pointer, keyframes, and knowing when they are done.
+- [Transforms](transforms.md): visual translation, scaling and rotation of
+  any element, which the pointer, text input and accessibility follow.
 - [Custom widgets](custom-widgets.md): the widgets without a look that every
   widget is built on, and widgets of your own.
 - [Windows with native UI](windows.md): window options, title bars drawn by
@@ -150,6 +154,14 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
 - [Find bar](find-bar.md): a bar for finding text, with the count of
   matches and the next and previous ones.
 
+## Code
+
+- [Code editor](code-editor.md): an editor of code as Zed's, with
+  highlighting, several carets, folding, completions and diagnostics, for
+  files of any size.
+- [Diff viewer](diff-viewer.md): the changes between two texts, side by
+  side or unified, with the new text editable and changes to review.
+
 ## Dates and colors
 
 - [Calendar](calendar.md): a month choosing a day.
@@ -207,6 +219,12 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   on.
 - [Meter](meter.md): a value in a range, colored by its level.
 - [Badge](badge.md): a short text in a pill, as a count.
+
+## Charts
+
+- [Charts](chart.md): scales, axes and marks without a look, for bars,
+  lines, areas, stacks and donuts, and a selection the pointer and the
+  keyboard move.
 
 ## Images
 

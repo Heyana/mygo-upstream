@@ -88,6 +88,41 @@ as long as it would show on a connected display. They override `X`, `Y`,
 stay the defaults of the first launch. Give each kind of window its own key:
 `"main"`, `"preferences"`.
 
+An app that keeps its data elsewhere, such as in its own database, keeps
+the states there with a `WindowStateStore`, set before the first window
+with a `StateKey`, and no `window-state.json` is written:
+
+```go
+type windowStates struct{ db *sql.DB }
+
+func (s windowStates) LoadWindowStates() (map[string]mygo.WindowState, error) {
+	var data []byte
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key = 'windows'`).Scan(&data)
+	if err != nil {
+		return nil, err
+	}
+	var states map[string]mygo.WindowState
+	return states, json.Unmarshal(data, &states)
+}
+
+func (s windowStates) SaveWindowStates(states map[string]mygo.WindowState) error {
+	data, err := json.Marshal(states)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`INSERT OR REPLACE INTO settings (key, value) VALUES ('windows', ?)`, data)
+	return err
+}
+
+mygo.App.SetWindowStateStore(windowStates{db})
+```
+
+MyGo loads the states once, when the first window with a `StateKey` is
+created, and saves them all when such a window closes and when the app
+quits, on the main thread. Windows open with their options when there are
+no states or loading them fails; a save that fails is tried again the next
+time.
+
 ## Size, position and state
 
 ```go
@@ -197,10 +232,11 @@ With `Focusable`, a flyout takes the keyboard as it shows and closes as a
 menu does when the user presses outside it, another window takes the
 keyboard or the app is deactivated. `OnClose` listeners hear it and may
 keep it open, except on Wayland, whose compositor dismisses it. On Linux
-and Windows the press only closes the flyout, as it closes their menus,
-so a click on the button that opened it does not open it again; on macOS
-it goes on to what is under the pointer. Menus, lists to choose from and
-popovers are focusable, and handle their own keys: the arrows, Enter.
+and Windows the press only closes the flyout, as it closes their menus;
+on macOS it goes on to what is under the pointer, but on the anchor, as
+AppKit's popovers. So a click on the button that opened it closes it, and
+does not open it again. Menus, lists to choose from and popovers are
+focusable, and handle their own keys: the arrows, Enter.
 
 Without it, a flyout never takes the keyboard, which stays in the parent,
 and it stays until it is closed: a tooltip, a hover card, or the

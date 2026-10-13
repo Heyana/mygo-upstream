@@ -81,13 +81,18 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.scroll(float32(ev.DX), float32(ev.DY), Modifiers(ev.Mods), ev.Precise)
 	case platform.KeyPressed:
 		rt.modsChanged(Modifiers(ev.Mods))
-		taken = rt.keyDown(Modifiers(ev.Mods), Key(ev.Key), ev.Repeat)
+		taken = rt.keyDownPhysical(Modifiers(ev.Mods), Key(ev.Key), Key(ev.PhysicalKey), ev.Repeat)
 	case platform.ModifiersChanged:
 		rt.modsChanged(Modifiers(ev.Mods))
 	case platform.KeyReleased:
 		rt.modsChanged(Modifiers(ev.Mods))
+		key, physical := Key(ev.Key), Key(ev.PhysicalKey)
+		if key == KeyUnknown && rt.byPosition[physical] {
+			key = physical
+		}
+		delete(rt.byPosition, physical)
 		if h := rt.focusHandler(); h != nil {
-			rt.deliver(h, InputEvent{Kind: InputKeyUp, Key: Key(ev.Key), Mods: Modifiers(ev.Mods)})
+			rt.deliver(h, InputEvent{Kind: InputKeyUp, Key: key, PhysicalKey: physical, Mods: Modifiers(ev.Mods)})
 		}
 	case platform.TextInput:
 		rt.ime.compositionID = 0
@@ -121,7 +126,7 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	case platform.SurfaceFocus:
 		rt.windowFocused = true
 		rt.blinkStart = time.Now()
-		rt.requestFrame()
+		rt.focusChanged()
 	case platform.SurfaceBlur:
 		if rt.touch.active {
 			// Losing focus may end a contact without another pointer event.
@@ -135,6 +140,7 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.selection.dragging = false
 		// Keys let go of elsewhere never come back up here.
 		rt.modsChanged(0)
+		clear(rt.byPosition)
 		if p := rt.pressed; p != nil {
 			// The release will not come: an element taking its input
 			// gets one now.
@@ -143,8 +149,9 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 			}
 			p.pressed = false
 			rt.pressed = nil
+			rt.requestFrame()
 		}
-		rt.requestFrame()
+		rt.focusChanged()
 	case platform.FileDragOver:
 		taken = rt.fileDrag(x, y)
 	case platform.FileDragLeave:
@@ -183,7 +190,7 @@ func (rt *engine) hitChain(x, y float32) []uint64 { return rt.appendHitChain(nil
 func (rt *engine) appendHitChain(chain []uint64, x, y float32) []uint64 {
 	for i := len(rt.hits) - 1; i >= 0; i-- {
 		h := &rt.hits[i]
-		if !h.r.Contains(x, y) {
+		if !rt.contains(h.st, h.r, x, y) {
 			continue
 		}
 		for s := h.st; s != nil; s = rt.states[s.parent] {
@@ -233,20 +240,25 @@ func (rt *engine) pointerMove(x, y float32) {
 	if d := &rt.scrollDrag; d.st != nil {
 		s := d.st
 		g := d.bars(rt.c.theme.scrollbarWidth())
+		lx, ly := s.local(x, y)
+		lx += s.x
+		ly += s.y
 		if d.horizontal {
 			if travel := g.hTrack.W - 4 - g.h.W; travel > 0 {
-				s.scrollTo(dragTo(d.from, x-d.start, travel, d.contentW-float64(s.w), s.contentW-float64(s.w)), s.scrollY)
+				s.scrollTo(dragTo(d.from, lx-d.start, travel, d.contentW-float64(s.w), s.contentW-float64(s.w)), s.scrollY)
 			}
 		} else if travel := g.vTrack.H - 4 - g.v.H; travel > 0 {
-			s.scrollTo(s.scrollX, dragTo(d.from, y-d.start, travel, d.contentH-float64(s.h), s.contentH-float64(s.h)))
+			s.scrollTo(s.scrollX, dragTo(d.from, ly-d.start, travel, d.contentH-float64(s.h), s.contentH-float64(s.h)))
 		}
 		rt.pointerX, rt.pointerY = x, y
 		rt.requestFrame()
 		return
 	}
 	if rt.pressed != nil && rt.pointerIn {
-		rt.pressed.dragX += x - rt.pointerX
-		rt.pressed.dragY += y - rt.pointerY
+		dx, dy := rt.pressed.vector(rt.pointerX, rt.pointerY, x-rt.pointerX, y-rt.pointerY)
+		rt.pressed.dragX += dx
+		rt.pressed.dragY += dy
+		rt.pressed.drag.move(rt.now(), dx, dy, x-rt.pointerX, y-rt.pointerY)
 		if rt.pressed.flags&(flagTrackPointer|flagDraggable|flagEditable|flagSelectable) != 0 {
 			rt.requestFrame()
 		} else {
@@ -295,6 +307,7 @@ const interactive = flagClickable | flagFocusable | flagEditable | flagSelectabl
 func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, count int) {
 	chain := rt.hitChain(x, y)
 	rt.setHover(chain)
+	rt.pressDragger = 0
 	if len(chain) > 0 {
 		rt.downs = append(rt.downs, chain[0])
 	} else {
@@ -336,7 +349,8 @@ func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, count in
 		rt.pressed, rt.pressButton = h, button
 		h.pressed = true
 		h.pressPending = true
-		h.pressX, h.pressY = x-h.x, y-h.y
+		h.pressX, h.pressY = h.local(x, y)
+		h.drag.reset(rt.now(), x, y)
 		return
 	}
 	if button == 1 && rt.menuPress(chain, x, y) {
@@ -369,15 +383,17 @@ func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers, count in
 		return
 	}
 	rt.pressed, rt.pressButton = target, button
+	rt.pressDragger = pressDragger(rt, chain, target)
 	target.pressed, target.pressMods = true, mods
 	target.pressPending = true
-	target.pressX, target.pressY = x-target.x, y-target.y
+	target.pressX, target.pressY = target.local(x, y)
+	target.drag.reset(rt.now(), x, y)
 	if button == 0 && rt.pressTextSelection(target, x, y, mods, clicks) {
 		return
 	}
 	if target.editor != nil {
 		target.editor.pressMods = mods
-		target.editor.press(x-target.x, y-target.y, clicks, button)
+		target.editor.press(target.pressX, target.pressY, clicks, button)
 	}
 	if clicks == 2 && button == 0 {
 		target.doubleClicks++
@@ -413,13 +429,20 @@ func (rt *engine) pointerUp(button, clicks int) {
 	}
 	rt.pressed = nil
 	s.pressed = false
+	// A press that moved ends a drag; a click does not.
+	s.released = s.drag.n > 1
+	v := s.drag.velocities(rt.now())
+	s.releaseVX, s.releaseVY, s.releaseWX, s.releaseWY = v[0], v[1], v[2], v[3]
 	if s.editor != nil {
 		s.editor.release()
 	}
-	inside := Rect{s.vx, s.vy, s.vw, s.vh}.Contains(rt.pointerX, rt.pointerY)
+	inside := rt.contains(s, Rect{s.x, s.y, s.w, s.h}, rt.pointerX, rt.pointerY)
 	if inside && s.flags&flagDisabled == 0 {
 		switch button {
 		case 0:
+			if s.dragRec.dragged(rt, s) {
+				break // it moved the element (Draggable): no click
+			}
 			s.clicks++
 			s.clickMods = s.pressMods
 		case 1:
@@ -440,7 +463,12 @@ func (rt *engine) scroll(dx, dy float32, mods Modifiers, precise bool) {
 		dx, dy = dy, 0
 	}
 	for _, id := range chain {
-		if s := rt.states[id]; s != nil && scrollBy(s, dx, dy) {
+		s := rt.states[id]
+		if s == nil {
+			continue
+		}
+		sx, sy := s.vector(rt.pointerX, rt.pointerY, dx, dy)
+		if scrollBy(s, sx, sy) {
 			rt.requestFrame()
 			return
 		}
@@ -480,6 +508,9 @@ func scrollBy(s *state, dx, dy float32) bool {
 	}
 	if x == s.scrollX && y == s.scrollY {
 		return false
+	}
+	if s.track != nil {
+		s.track.glide = nil // the user takes over from ScrollTo
 	}
 	s.scrollTo(x, y)
 	return true
@@ -580,6 +611,22 @@ func (rt *engine) claimedBy(k keyEvent, window bool) bool {
 // keyDown handles a key pressed, and reports whether an element took it as
 // it came (HandleInput).
 func (rt *engine) keyDown(mods Modifiers, key Key, repeat bool) bool {
+	return rt.keyDownPhysical(mods, key, KeyUnknown, repeat)
+}
+
+// keyDownPhysical is keyDown with the key by position (InputEvent.PhysicalKey).
+// A chord of a key the layout does not type as a US key, as S on a Cyrillic
+// layout, matches shortcuts by that position; plain typing is untouched.
+func (rt *engine) keyDownPhysical(mods Modifiers, key, physical Key, repeat bool) bool {
+	if platform.KeyByPosition(platform.Key(key), platform.Key(physical), platform.Modifiers(mods)) {
+		if rt.byPosition == nil {
+			rt.byPosition = map[Key]bool{}
+		}
+		rt.byPosition[physical] = true
+		key = physical
+	} else if !repeat {
+		delete(rt.byPosition, physical)
+	}
 	if rt.inspectKey(mods, key) {
 		return true
 	}
@@ -587,7 +634,7 @@ func (rt *engine) keyDown(mods Modifiers, key Key, repeat bool) bool {
 	if key == KeyEscape && mods == 0 && rt.dragCancel() {
 		return true
 	}
-	if h := rt.focusHandler(); h != nil && !rt.claimed(k) && rt.deliver(h, InputEvent{Kind: InputKeyDown, Key: key, Mods: mods, Repeat: repeat}) {
+	if h := rt.focusHandler(); h != nil && !rt.claimed(k) && rt.deliver(h, InputEvent{Kind: InputKeyDown, Key: key, PhysicalKey: physical, Mods: mods, Repeat: repeat}) {
 		rt.blinkStart = time.Now()
 		return true
 	}
@@ -798,7 +845,7 @@ func (rt *engine) shortcut(id uint64, mods Modifiers, key Key) bool {
 }
 
 func (rt *engine) editEvent(ev editEvent) {
-	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !ev.snapshot && !rt.snapshotTextInput(s) && rt.windowFocused && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
+	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !ev.snapshot && !rt.snapshotTextInput(s) && rt.windowFocus() && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
 		if ev.kind == editInsert || ev.kind == editCompose {
 			var r *TextInputRange
 			if ev.replace {
@@ -849,16 +896,17 @@ const imeContext = 512
 func (rt *engine) updateTextInput() {
 	var t platform.TextInputState
 	base := 0
-	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !rt.snapshotTextInput(s) && rt.windowFocused && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
+	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !rt.snapshotTextInput(s) && rt.windowFocus() && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
 		t.Active, t.Client = true, s.textAdapter
 		sel := s.textAdapter.Selection()
 		caret := sel.Caret()
 		if bounds, _, ok := s.textAdapter.BoundsForRange(TextInputRange{Start: caret, End: caret}); ok {
 			t.Caret = bounds
 		} else {
-			t.Caret = platform.RectF{X: float64(s.x), Y: float64(s.y), W: 1, H: float64(s.h)}
+			r := transformRect(s.world, Rect{X: s.x, Y: s.y, W: 1, H: s.h})
+			t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
 		}
-	} else if s != nil && s.editor == nil && s.input != nil && s.takesText && rt.windowFocused {
+	} else if s != nil && s.editor == nil && s.input != nil && s.takesText && rt.windowFocus() {
 		// An element taking text itself: no text around the caret.
 		t.Options = s.inputOptions.nativeOptions()
 		t.Active = true
@@ -871,8 +919,9 @@ func (rt *engine) updateTextInput() {
 		if s.caretFn != nil {
 			r = s.caretFn()
 		}
-		t.Caret = platform.RectF{X: float64(s.x + r.X), Y: float64(s.y + r.Y), W: float64(r.W), H: float64(r.H)}
-	} else if s != nil && s.editor != nil && s.flags&(flagEditable|flagSelectable) != 0 && (!s.editor.readOnly || rt.nativeSelection(s)) && rt.windowFocused {
+		r = transformRect(s.world, Rect{s.x + r.X, s.y + r.Y, r.W, r.H})
+		t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+	} else if s != nil && s.editor != nil && s.flags&(flagEditable|flagSelectable) != 0 && (!s.editor.readOnly || rt.nativeSelection(s)) && rt.windowFocus() {
 		ed := s.editor
 		r := ed.caretRect(s)
 		t.Active = true
@@ -1049,7 +1098,7 @@ func (e *node) Hovered() bool {
 		// The hover holds the elements under the pointer as the press
 		// began.
 		s := e.st
-		return rt.pointerIn && Rect{s.vx, s.vy, s.vw, s.vh}.Contains(rt.pointerX, rt.pointerY)
+		return rt.pointerIn && rt.contains(s, Rect{s.x, s.y, s.w, s.h}, rt.pointerX, rt.pointerY)
 	}
 	return true
 }
@@ -1062,8 +1111,8 @@ func (rt *engine) pressMove(x0, y0, x1, y1 float32) {
 		if s == nil || s == rt.pressed || s.flags&flagHover == 0 {
 			continue
 		}
-		r := Rect{s.vx, s.vy, s.vw, s.vh}
-		if r.Contains(x0, y0) != r.Contains(x1, y1) {
+		r := Rect{s.x, s.y, s.w, s.h}
+		if rt.contains(s, r, x0, y0) != rt.contains(s, r, x1, y1) {
 			rt.requestFrame()
 			return
 		}
@@ -1079,7 +1128,7 @@ func (e *node) Pressed() bool {
 	e.flags |= flagClickable | flagHover
 	s := e.st
 	rt := e.c.rt
-	if !s.pressed || e.disabled() || !(Rect{s.vx, s.vy, s.vw, s.vh}).Contains(rt.pointerX, rt.pointerY) {
+	if !s.pressed || e.disabled() || !rt.contains(s, Rect{s.x, s.y, s.w, s.h}, rt.pointerX, rt.pointerY) {
 		return false
 	}
 	if s.pressPending {
@@ -1093,7 +1142,7 @@ func (e *node) Pressed() bool {
 
 // Focused reports whether the element has the keyboard focus.
 func (e *node) Focused() bool {
-	return e.hasState() && e.c.rt.focused == e.id && e.c.rt.windowFocused
+	return e.hasState() && e.c.rt.focused == e.id && e.c.rt.windowFocus()
 }
 
 // Blur clears keyboard focus and dismisses the software keyboard. It is useful
@@ -1176,12 +1225,12 @@ func (e *node) PointerPosition() (x, y float32, over bool) {
 	e.flags |= flagTrackPointer
 	rt := e.c.rt
 	s := e.st
-	x, y = rt.pointerX-s.x, rt.pointerY-s.y
-	return x, y, rt.pointerIn && Rect{s.vx, s.vy, s.vw, s.vh}.Contains(rt.pointerX, rt.pointerY)
+	x, y = s.local(rt.pointerX, rt.pointerY)
+	return x, y, rt.pointerIn && rt.contains(s, Rect{s.x, s.y, s.w, s.h}, rt.pointerX, rt.pointerY)
 }
 
-// Dragged reports how far the pointer moved since the last frame while
-// pressing the element.
+// Dragged reports how far the pointer moved in the element's local axes
+// since the last frame while pressing it.
 func (e *node) Dragged() (dx, dy float32, ok bool) {
 	if !e.hasState() {
 		return 0, 0, false
@@ -1195,6 +1244,121 @@ func (e *node) Dragged() (dx, dy float32, ok bool) {
 		e.c.rt.consumed = true
 	}
 	return s.dragX, s.dragY, true
+}
+
+// DragVelocity returns how fast, in DIPs per second along the element's
+// local axes, the pointer pressing the element moves now: zero once it
+// stops for a moment, or while nothing presses the element.
+func (e *node) DragVelocity() (vx, vy float32) {
+	if !e.hasState() {
+		return 0, 0
+	}
+	e.flags |= flagDraggable
+	s := e.st
+	if !s.pressed {
+		return 0, 0
+	}
+	return s.drag.velocity(e.c.rt.now())
+}
+
+// DragEnded reports whether the pointer pressing the element, and moving,
+// let go since the last frame, with how fast it moved then, as
+// DragVelocity: a spring taking over (SpringOptions.Velocity) keeps the
+// fling going. A click, which does not move, ends no drag.
+func (e *node) DragEnded() (vx, vy float32, ok bool) {
+	if !e.hasState() {
+		return 0, 0, false
+	}
+	e.flags |= flagDraggable
+	s := e.st
+	if !s.released {
+		return 0, 0, false
+	}
+	e.c.rt.consumed = true
+	return s.releaseVX, s.releaseVY, true
+}
+
+// dragTrack keeps the last moves of a press, to tell how fast it goes: in
+// the element's axes (x, y), and in the window's (wx, wy, from where the
+// press began, ox and oy). far tells that the press went dragStart DIPs
+// from there.
+type dragTrack struct {
+	x, y    float32
+	ox, oy  float32
+	wx, wy  float32
+	far     bool
+	samples [8]dragSample
+	n, last int
+}
+
+type dragSample struct {
+	at           time.Time
+	x, y, wx, wy float32
+}
+
+// reset starts tracking a press at the window's point (x, y).
+func (d *dragTrack) reset(now time.Time, x, y float32) {
+	*d = dragTrack{ox: x, oy: y}
+	d.add(now)
+}
+
+func (d *dragTrack) add(now time.Time) {
+	d.last = (d.last + 1) % len(d.samples)
+	d.samples[d.last] = dragSample{now, d.x, d.y, d.wx, d.wy}
+	d.n = min(d.n+1, len(d.samples))
+}
+
+// move adds a move by dx, dy in the element's axes, wdx, wdy in the
+// window's, at now.
+func (d *dragTrack) move(now time.Time, dx, dy, wdx, wdy float32) {
+	if wdx == 0 && wdy == 0 {
+		return // as with the release's position
+	}
+	d.x += dx
+	d.y += dy
+	d.wx += wdx
+	d.wy += wdy
+	d.far = d.far || d.wx*d.wx+d.wy*d.wy >= dragStart*dragStart
+	d.add(now)
+}
+
+// velocity returns how fast the press went over its last 100 ms in the
+// element's axes, zero once it has not moved for 50 ms.
+func (d *dragTrack) velocity(now time.Time) (float32, float32) {
+	v := d.velocities(now)
+	return v[0], v[1]
+}
+
+// windowVelocity returns how fast the press went, as velocity does, in
+// the window's axes.
+func (d *dragTrack) windowVelocity(now time.Time) (float32, float32) {
+	v := d.velocities(now)
+	return v[2], v[3]
+}
+
+// velocities returns how fast the press went in the element's axes and
+// in the window's.
+func (d *dragTrack) velocities(now time.Time) [4]float32 {
+	if d.n < 2 {
+		return [4]float32{}
+	}
+	newest := d.samples[d.last]
+	if now.Sub(newest.at) > 50*time.Millisecond {
+		return [4]float32{}
+	}
+	oldest := newest
+	for i := 1; i < d.n; i++ {
+		s := d.samples[(d.last-i+len(d.samples))%len(d.samples)]
+		if newest.at.Sub(s.at) > 100*time.Millisecond {
+			break
+		}
+		oldest = s
+	}
+	dt := float32(newest.at.Sub(oldest.at).Seconds())
+	if dt <= 0 {
+		return [4]float32{}
+	}
+	return [4]float32{(newest.x - oldest.x) / dt, (newest.y - oldest.y) / dt, (newest.wx - oldest.wx) / dt, (newest.wy - oldest.wy) / dt}
 }
 
 // Changed applies pending input to the controls built so far and reports
@@ -1241,26 +1405,35 @@ func (rt *engine) scrollbarPress(chain []uint64, x, y float32) bool {
 		if s == nil || s.flags&(flagScrollX|flagScrollY) == 0 {
 			continue
 		}
+		lx, ly := s.local(x, y)
+		lx += s.x
+		ly += s.y
 		g := scrollBars(Rect{s.x, s.y, s.w, s.h}, s.barInset, float32(s.contentW), float32(s.contentH), float32(s.scrollX), float32(s.scrollY), s.flags, rt.c.theme.scrollbarWidth())
 		d := &rt.scrollDrag
 		w, h := float64(s.w), float64(s.h)
 		switch {
-		case g.vertical && g.vTrack.Contains(x, y):
+		case g.vertical && g.vTrack.Contains(lx, ly):
 			switch {
-			case y >= g.v.Y && y < g.v.Y+g.v.H:
-				d.st, d.start, d.from, d.horizontal = s, y, s.scrollY, false
+			case ly >= g.v.Y && ly < g.v.Y+g.v.H:
+				d.st, d.start, d.from, d.horizontal = s, ly, s.scrollY, false
+				if s.track != nil {
+					s.track.glide = nil
+				}
 				d.contentW, d.contentH = s.contentW, s.contentH
-			case y < g.v.Y:
+			case ly < g.v.Y:
 				s.scrollTo(s.scrollX, max(0, s.scrollY-h*0.9))
 			default:
 				s.scrollTo(s.scrollX, min(s.contentH-h, s.scrollY+h*0.9))
 			}
-		case g.horizontal && g.hTrack.Contains(x, y):
+		case g.horizontal && g.hTrack.Contains(lx, ly):
 			switch {
-			case x >= g.h.X && x < g.h.X+g.h.W:
-				d.st, d.start, d.from, d.horizontal = s, x, s.scrollX, true
+			case lx >= g.h.X && lx < g.h.X+g.h.W:
+				d.st, d.start, d.from, d.horizontal = s, lx, s.scrollX, true
+				if s.track != nil {
+					s.track.glide = nil
+				}
 				d.contentW, d.contentH = s.contentW, s.contentH
-			case x < g.h.X:
+			case lx < g.h.X:
 				s.scrollTo(max(0, s.scrollX-w*0.9), s.scrollY)
 			default:
 				s.scrollTo(min(s.contentW-w, s.scrollX+w*0.9), s.scrollY)
@@ -1272,6 +1445,23 @@ func (rt *engine) scrollbarPress(chain []uint64, x, y float32) bool {
 		return true
 	}
 	return false
+}
+
+// windowFocus reports whether the window has the keyboard focus, noting
+// that the frame depends on it.
+func (rt *engine) windowFocus() bool {
+	rt.focusRead = true
+	return rt.windowFocused
+}
+
+// focusChanged draws a frame after the window gained or lost the keyboard
+// focus, when the last frame read it (a focus ring, a caret, a selection):
+// another frame would draw the same, as a window hides or shows again, and
+// cost the GPU's driver tens of MB for a second or two.
+func (rt *engine) focusChanged() {
+	if rt.focusRead {
+		rt.requestFrame()
+	}
 }
 
 // modsChanged takes the modifier keys held now, drawing a frame when they

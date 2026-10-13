@@ -38,6 +38,17 @@ if app.log.Y >= app.log.MaxY {
 ui.Scroll(c).TrackScroll(&app.log).Grow(1).Children(app.lines)
 ```
 
+`ScrollTo(x, y, animation)` scrolls there smoothly, as a spring or a curve
+(see [Motion](motion.md)), turning toward a new place if called again on
+the way; the user scrolling stops it, and `Scrolling()` reports whether it
+is on its way. Where the desktop asks for less motion, it scrolls at once:
+
+```go
+if ui.Button(c, "Back to top").Clicked() {
+	app.feed.ScrollTo(0, 0, ui.Smooth)
+}
+```
+
 ## Scrolling into view
 
 `ScrollIntoView` scrolls the containers around an element as little as

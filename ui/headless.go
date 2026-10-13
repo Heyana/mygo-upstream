@@ -28,7 +28,7 @@ type headless struct {
 	opened    []string
 	// escapes counts the Escapes nothing handled.
 	escapes int
-	openErr   error
+	openErr error
 	// later are what the view asked to run after the frame, as a window
 	// posts them to the main thread.
 	later  []func()
@@ -447,6 +447,25 @@ func (t *Tester) HoldModifiers(mods Modifiers) {
 func (t *Tester) Key(mods Modifiers, key Key) {
 	t.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(key), Mods: platform.Modifiers(mods)})
 	t.send(platform.SurfaceEvent{Kind: platform.KeyReleased, Key: platform.Key(key), Mods: platform.Modifiers(mods)})
+}
+
+// KeyDown presses a key and holds it, as a player holds a key that walks,
+// until KeyUp.
+func (t *Tester) KeyDown(key Key) {
+	t.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.Key(key)})
+}
+
+// KeyUp releases a key KeyDown held.
+func (t *Tester) KeyUp(key Key) {
+	t.send(platform.SurfaceEvent{Kind: platform.KeyReleased, Key: platform.Key(key)})
+}
+
+// KeyAt presses a key that the active layout does not type as a US key
+// (Key is KeyUnknown), at position physical of an ANSI US keyboard, as S
+// is pressed on a Cyrillic layout.
+func (t *Tester) KeyAt(mods Modifiers, physical Key) {
+	t.send(platform.SurfaceEvent{Kind: platform.KeyPressed, PhysicalKey: platform.Key(physical), Mods: platform.Modifiers(mods)})
+	t.send(platform.SurfaceEvent{Kind: platform.KeyReleased, PhysicalKey: platform.Key(physical), Mods: platform.Modifiers(mods)})
 }
 
 // TypeKey presses a key that types text, as a keyboard does: the key goes

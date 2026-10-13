@@ -238,7 +238,7 @@ func (rt *engine) accessTree() *platform.AccessTree {
 	default:
 		rt.accessElement(t, root, -1, false, &focused)
 	}
-	if rt.windowFocused && rt.focused != 0 {
+	if rt.windowFocus() && rt.focused != 0 {
 		focus := rt.focused
 		// A list choosing rows with the arrows has the focus for them:
 		// assistive technology follows the row chosen, as the arrows move
@@ -295,7 +295,7 @@ func (rt *engine) accessElement(t *platform.AccessTree, e *node, parent int, scr
 	if role, ok := e.accessRole(); ok {
 		n := platform.AccessNode{
 			ID: e.id, Parent: parent, Role: role, Label: e.label,
-			Bounds: platform.RectF{X: float64(e.x), Y: float64(e.y), W: float64(e.w), H: float64(e.h)},
+			Bounds: accessBounds(e),
 		}
 		if scrolled {
 			n.Actions |= platform.ActionScrollIntoView
@@ -458,6 +458,9 @@ func (rt *engine) accessDetails(e *node, n *platform.AccessNode) {
 			n.Value = ed.buf.string()
 			n.SelStart, n.SelEnd = ed.selection()
 		}
+	}
+	if e.accFill != nil {
+		e.accFill(n)
 	}
 }
 
