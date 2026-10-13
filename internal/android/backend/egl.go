@@ -16,6 +16,7 @@ import "C"
 
 import (
 	"fmt"
+	"log"
 	"unsafe"
 )
 
@@ -107,6 +108,19 @@ func (e *eglState) init() error {
 	e.display, e.config, e.context = display, config, context
 	e.initialized = true
 	return nil
+}
+
+// ensureWindow makes the EGLSurface for window if there is none yet, and does
+// nothing when one exists. It is createWindow for a caller that runs on every
+// frame and must not tear down a working surface to make another — see
+// makeCurrentForFrame for why the retry has to happen there.
+func (e *eglState) ensureWindow(window unsafe.Pointer) {
+	if e.surface != C.EGL_NO_SURFACE {
+		return
+	}
+	if err := e.createWindow(window); err != nil {
+		log.Printf("mygo/android: egl: %v", err)
+	}
 }
 
 // createWindow makes the EGLSurface for the ANativeWindow Java handed us.

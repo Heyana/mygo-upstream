@@ -89,9 +89,11 @@ type Backend struct {
 	// from the first surfaceCreated until the backend quits.
 	surface *Surface
 	// surfaceRenewed tells that a surface has already arrived, so the next
-	// one is a replacement and the window is told (SurfaceRenew). See
-	// surfaceCreated.
+	// one is a replacement and the window is told (SurfaceRenew). renewPending
+	// carries that from surfaceCreated to surfaceChanged, which delivers it
+	// once the EGLSurface exists. See surfaceChanged.
 	surfaceRenewed bool
+	renewPending   bool
 	// win is the app's window, once App.Run's NewWindow has made it. The
 	// backend owns it because the surface events that drive it arrive here.
 	win *window
@@ -387,25 +389,24 @@ func (b *Backend) OnKey(keyCode, action, metaState int) {
 	b.Post(func() { b.key(keyCode, action, metaState) })
 }
 
-// surfaceCreated (pump) adopts the ANativeWindow of a (re)created surface and,
-// when it replaced an earlier one, tells the window its renderer has to be
-// made again. The EGL display and context are made once and kept; only the
-// EGLSurface is rebuilt, which is the whole point of the split (see egl.go).
+// surfaceCreated (pump) adopts the ANativeWindow of a (re)created surface. The
+// EGL display and context are made once and kept; only the EGLSurface is
+// rebuilt, which is the whole point of the split (see egl.go).
+//
+// The window is told its renderer is stale from surfaceChanged, not here: the
+// EGLSurface does not exist until then (see adoptSurface), and a renewal that
+// arrives first makes the window build a renderer with no current context —
+// gl.New fails with "OpenGL 0.0 is too old" and the window drops to drawing in
+// memory. surfaceChanged is also where the surface genuinely comes up, so it is
+// the earliest point a renewal can succeed.
 func (b *Backend) surfaceCreated(window unsafe.Pointer) {
-	renew := b.adoptSurface(window)
-	if renew {
-		// 🔴 Delivered outside the lock: b.deliver takes b.mu too, and a
-		// sync.Mutex is not reentrant — renewing from inside the lock
-		// deadlocked the pump on the first background switch.
-		log.Printf("mygo/android: new surface, renewing the window's renderer")
-		b.deliver(platform.SurfaceEvent{Kind: platform.SurfaceRenew})
-	}
+	b.adoptSurface(window)
 }
 
-// adoptSurface takes the ANativeWindow of a (re)created surface and reports
-// whether it replaced an earlier one, which is when the window's renderer has
-// to be made again. See surfaceCreated for the whole story.
-func (b *Backend) adoptSurface(window unsafe.Pointer) bool {
+// adoptSurface takes the ANativeWindow of a (re)created surface and notes that
+// the window's renderer is stale, for surfaceChanged to deliver. See
+// surfaceCreated for the whole story.
+func (b *Backend) adoptSurface(window unsafe.Pointer) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.egl == nil {
@@ -413,7 +414,7 @@ func (b *Backend) adoptSurface(window unsafe.Pointer) bool {
 	}
 	if err := b.egl.init(); err != nil {
 		log.Printf("mygo/android: egl: %v", err)
-		return false
+		return
 	}
 	if b.surface == nil {
 		b.surface = &Surface{b: b, egl: b.egl}
@@ -443,6 +444,7 @@ func (b *Backend) adoptSurface(window unsafe.Pointer) bool {
 	// window's own NewWindow asks for its first frame regardless.
 	renew := b.surfaceRenewed
 	b.surfaceRenewed = true
+	b.renewPending = renew
 	// 🔴 The EGLSurface is NOT made here, and that is the fix for a real
 	// EGL_BAD_ALLOC (0x3003) on a 1440x3168 phone.
 	//
@@ -459,16 +461,15 @@ func (b *Backend) adoptSurface(window unsafe.Pointer) bool {
 	// gio's GioView ignores surfaceCreated outright — "surfaceChanged is
 	// guaranteed to be called immediately after this" — and makes its
 	// EGLSurface there. surfaceChanged below does the same thing now.
-	return renew
 }
 
-// surfaceChanged (pump) records the size and shows one frame — the frame
-// that proves the pipeline end to end: EGL context, EGLSurface, clear,
-// swap, display.
+// surfaceChanged (pump) records the size, makes the EGLSurface, and shows one
+// frame — the frame that proves the pipeline end to end: EGL context,
+// EGLSurface, clear, swap, display.
 func (b *Backend) surfaceChanged(w, h, dpi int) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if b.surface == nil || b.surface.window == nil {
+		b.mu.Unlock()
 		return
 	}
 	b.surface.width, b.surface.height = w, h
@@ -479,9 +480,25 @@ func (b *Backend) surfaceChanged(w, h, dpi int) {
 	// see surfaceCreated above for why it cannot be made before.
 	if b.egl.surface == nil {
 		if err := b.egl.createWindow(b.surface.window); err != nil {
+			b.mu.Unlock()
 			log.Printf("mygo/android: egl: %v", err)
 			return
 		}
+	}
+	renew := b.renewPending
+	b.renewPending = false
+	b.mu.Unlock()
+	// 🔴 Delivered outside the lock: b.deliver takes b.mu too, and a
+	// sync.Mutex is not reentrant — renewing from inside the lock deadlocked
+	// the pump on the first background switch.
+	//
+	// Delivered here rather than in surfaceCreated because only now does the
+	// EGLSurface exist: a renew before it makes the window build a renderer
+	// with no current context, and gl.New fails ("OpenGL 0.0 is too old"),
+	// dropping the app to drawing in memory — the very symptom this fixes.
+	if renew {
+		log.Printf("mygo/android: new surface, renewing the window's renderer")
+		b.deliver(platform.SurfaceEvent{Kind: platform.SurfaceRenew})
 	}
 	b.surface.PresentPixels(nil, 0, w, h)
 }

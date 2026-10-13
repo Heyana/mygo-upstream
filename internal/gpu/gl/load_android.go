@@ -28,10 +28,36 @@ import (
 // Android loads with the context. gl.New is called after eglMakeCurrent
 // for exactly this reason.
 //
+// 🔴 A load with no current context is not a verdict, and caching one as if
+// it were cost a device every GPU frame it ever drew.
+//
+// eglGetProcAddress answers nothing useful with no context current, so the
+// first ask comes back with every name missing. loadOnce then latched that
+// answer for the life of the process — and on this device the very first
+// frame is asked for before any surface is usable (ColorOS hands the launch
+// surfaceCreated → surfaceChanged → surfaceDestroyed inside ten
+// milliseconds, and the EGLSurface create fails, see
+// internal/android/backend/frame.go), so the latch was taken with no
+// context and every later renderer, however good its surface, was refused
+// with "OpenGL 0.0 is too old".
+//
+// So: latch success, and latch a failure only when a context was current and
+// the names are still missing — that is a driver's real answer. With no
+// context, do nothing and let the next frame try again once there is one.
+//
 // Desktop GL extensions (epoxy's epoxy_* and one desktop-only entry point)
 // have no place here: an Android GLES3 context has no such things, and
 // asking for them would make load() fail on a device that is behaving.
 func load() error {
+	if errLoad != nil && errLoadLatched {
+		return errLoad
+	}
+	if currentContext() == 0 {
+		// Nothing is current: eglGetProcAddress would answer nothing and
+		// register nothing. Leave errLoad unlatched so the next call, made
+		// with a context, does the real work.
+		return errNoContext
+	}
 	loadOnce.Do(func() {
 		var missing []string
 		gl := func(f any, name string) {
@@ -102,6 +128,9 @@ func load() error {
 		gl(&glBlitFramebuffer, "glBlitFramebuffer")
 		if len(missing) > 0 {
 			errLoad = fmt.Errorf("gl: eglGetProcAddress lacks %s", strings.Join(missing, ", "))
+			// A context was current and the names are still absent: this is
+			// the driver's answer, and it will not change. Latch it.
+			errLoadLatched = true
 			return
 		}
 		// The GL version and the desktop question are answered here rather
@@ -110,7 +139,8 @@ func load() error {
 		epoxyGLVersion = esVersion
 		epoxyIsDesktopGL = func() bool { return false }
 		epoxyHasExtension = hasGLExtension
-
+		errLoad = nil
+		errLoadLatched = true
 	})
 	return errLoad
 }
