@@ -4,11 +4,14 @@
 # 逐项打印 ✅ / 🔴 / ⚠️，并在缺项后给出「怎么补」。不使用 set -e：必须把全部检查
 # 跑完再下结论，而不是碰到第一个失败就退出。
 #
-# 环境变量覆盖（默认值是本机实测值，可覆盖，不要写死到不可改）：
-#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根目录（默认 C:/Users/hzy/AppData/Local/Android/Sdk）
+# 环境变量覆盖（默认值是实测值，可覆盖，不要写死到不可改）：
+#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根目录（按平台给默认值，见下）
 #   ANDROID_NDK_VERSION               NDK 版本目录名（默认 28.2.13676358，即 r28）
-#   JAVA_HOME                         JDK 根目录（默认本机 Microsoft OpenJDK 17）
+#   JAVA_HOME                         JDK 根目录（Gradle/AGP 用）
 #   MYGO_ANDROID_CC                   C 交叉编译器（默认由 NDK + aarch64-linux-android29 推导）
+#
+# 平台自适应：HOST_TAG / 可执行后缀按 `uname` 推导，Windows(MSYS/Git Bash) 与
+# macOS / Linux 共用同一份脚本。默认 SDK / JDK 路径也按平台取，可用环境变量覆盖。
 #
 # 退出码：0 = 关键项齐全；1 = 有 🔴 关键项缺失。
 set -u
@@ -22,16 +25,45 @@ hint() { printf '     \342\206\263 \350\241\245\357\274\232%s\n' "$*"; }
 
 norm() { printf '%s' "${1//\\//}"; }
 
-SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-C:/Users/hzy/AppData/Local/Android/Sdk}}")"
+# ---- 平台自适应 --------------------------------------------------------------
+# uname 的 MINGW*/MSYS*/CYGWIN* 都来自 Windows；用它同时决定 HOST_TAG 与可执行后缀。
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    HOST_TAG="windows-x86_64"; EXE=".exe"; CLANG_SUFFIX=".cmd"
+    DEF_SDK="C:/Users/hzy/AppData/Local/Android/Sdk"
+    DEF_JDK="C:/Users/hzy/AppData/Local/Programs/Microsoft/jdk-17.0.10.7-hotspot" ;;
+  Darwin)
+    HOST_TAG="darwin-x86_64"; EXE=""; CLANG_SUFFIX=""
+    DEF_SDK="$HOME/Library/Android/sdk"
+    DEF_JDK="" ;;
+  *)
+    HOST_TAG="linux-x86_64"; EXE=""; CLANG_SUFFIX=""
+    DEF_SDK="$HOME/Android/Sdk"
+    DEF_JDK="" ;;
+esac
+# darwin 的 NDK prebuilt 目录名仍写 x86_64（即使 Apple Silicon，NDK r25+ 只有这一份）。
+
+SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$DEF_SDK}}")"
 NDK_VER="${ANDROID_NDK_VERSION:-28.2.13676358}"
 NDK_DIR="$SDK/ndk/$NDK_VER"
-JDK="$(norm "${JAVA_HOME:-C:/Users/hzy/AppData/Local/Programs/Microsoft/jdk-17.0.10.7-hotspot}")"
-HOST_TAG="windows-x86_64"
+# JDK 探测顺序：显式 JAVA_HOME → /usr/libexec/java_home → homebrew keg-only（21/17 版）。
+# macOS 上 brew 装的 JDK 是 keg-only，java_home 看不见，必须显式找。
+if [ -z "${JAVA_HOME:-}" ]; then
+  if [ -x /usr/libexec/java_home ]; then
+    DEF_JDK="$(/usr/libexec/java_home 2>/dev/null || true)"
+  fi
+  if [ -z "$DEF_JDK" ]; then
+    for cand in /opt/homebrew/opt/openjdk@21 /opt/homebrew/opt/openjdk@17 /opt/homebrew/opt/openjdk; do
+      [ -x "$cand/bin/java" ] && { DEF_JDK="$cand"; break; }
+    done
+  fi
+fi
+JDK="$(norm "${JAVA_HOME:-$DEF_JDK}")"
 TOOLDIR="$NDK_DIR/toolchains/llvm/prebuilt/$HOST_TAG/bin"
-CC="${MYGO_ANDROID_CC:-$TOOLDIR/aarch64-linux-android29-clang.cmd}"
-OBJDUMP="$TOOLDIR/llvm-objdump.exe"
-ADB="$SDK/platform-tools/adb.exe"
-EMU="$SDK/emulator/emulator.exe"
+CC="${MYGO_ANDROID_CC:-$TOOLDIR/aarch64-linux-android29-clang$CLANG_SUFFIX}"
+OBJDUMP="$TOOLDIR/llvm-objdump$EXE"
+ADB="$SDK/platform-tools/adb$EXE"
+EMU="$SDK/emulator/emulator$EXE"
 
 echo "=== android-doctor ==="
 echo "SDK   : $SDK"
@@ -66,22 +98,24 @@ fi
 echo "[3] CC 交叉编译器"
 if [ -f "$CC" ]; then ok "存在：$CC"; else
   bad "不存在：$CC"
-  hint "确认 NDK 已装、HOST_TAG=windows-x86_64，或设 MYGO_ANDROID_CC 指向 aarch64-linux-android<API>-clang.cmd"
+  hint "确认 NDK 已装、HOST_TAG=${HOST_TAG}，或设 MYGO_ANDROID_CC 指向 aarch64-linux-android<API>-clang$CLANG_SUFFIX"
 fi
 
-echo "[4] JDK（要求 17）"
+echo "[4] JDK（AGP 9.0.1 / Gradle 9.1.0 要求 ≥17；21 可用）"
 if [ -f "$JDK/bin/java" ]; then
   jver="$("$JDK/bin/java" -version 2>&1 | head -1)"
   printf '     %s\n' "$jver"
-  jmaj="$(printf '%s' "$jver" | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p')"
-  case "$jmaj" in
-    17) ok "JDK 17" ;;
-    '')  note "无法解析 JDK 主版本（原文见上）" ;;
-    *)   note "JDK 主版本=$jmaj，不是 17" ; hint "设 JAVA_HOME 指向 JDK 17（Gradle/AGP 需要）" ;;
+  # java -version 首行格式：`openjdk version "21.0.12.1" 2026-08-18` —— 取引号内主版本。
+  jmaj="$(printf '%s' "$jver" | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' || true)"
+  case "${jmaj:-}" in
+    '')            note "无法解析 JDK 主版本（原文见上）" ;;
+    1[0-6]|1[0-9]|[0-9]) note "JDK 主版本=${jmaj}，低于 17 —— AGP/Gradle 需要 ≥17"
+                   hint "设 JAVA_HOME 指向 JDK 17+（本机用 /opt/homebrew/opt/openjdk@21）" ;;
+    *)             ok "JDK 主版本=${jmaj}（≥17，满足 AGP/Gradle）" ;;
   esac
 else
   bad "找不到 $JDK/bin/java"
-  hint "设 JAVA_HOME 指向 JDK 17 安装目录"
+  hint "设 JAVA_HOME 指向 JDK 17+ 安装目录（如 /opt/homebrew/opt/openjdk@21）"
 fi
 
 echo "[5] platform-tools/adb"
@@ -92,7 +126,7 @@ fi
 
 echo "[6] emulator"
 if [ -f "$EMU" ]; then ok "存在：$EMU"; else
-  note "不存在：$EMU（无真机时需模拟器）"
+  note "不存在：${EMU}（无真机时需模拟器）"
   hint 'sdkmanager "emulator" 并创建 AVD'
 fi
 
@@ -105,13 +139,12 @@ if [ -d "$SDK/platforms" ]; then
     case "$v" in ''|*[!0-9]*) continue ;; esac
     [ "$v" -gt "$best" ] && best="$v"
   done
-  if [ "$best" -ge 31 ]; then ok "最高平台 android-$best（≥31）"; else
-    bad "最高平台 android-$best（<31）"; hint 'sdkmanager "platforms;android-36"'
+  if [ "$best" -ge 31 ]; then ok "最高平台 android-${best}（≥31）"; else
+    bad "最高平台 android-${best}（<31）"; hint 'sdkmanager "platforms;android-36"'
   fi
 else
   bad "无 $SDK/platforms 目录"; hint 'sdkmanager "platforms;android-36"'
 fi
-
 echo "[8] build-tools"
 if [ -d "$SDK/build-tools" ] && [ -n "$(ls -A "$SDK/build-tools" 2>/dev/null)" ]; then
   btl="$(ls "$SDK/build-tools" 2>/dev/null | tr '\n' ' ')"

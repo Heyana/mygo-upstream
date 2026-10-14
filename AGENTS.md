@@ -135,18 +135,24 @@ Windows GUI tests need Windows with the WebView2 Runtime (a GitHub Actions
 ## Runbook
 
 Android build/install/EGL checks live in `scripts/android-*.sh` (bash; run them from
-anywhere, they find the repo themselves). Toolchain paths default to this machine's
-measured values and are overridable by env (`ANDROID_HOME`/`ANDROID_SDK_ROOT`,
-`ANDROID_NDK_VERSION=28.2.13676358`, `JAVA_HOME`, `MYGO_ANDROID_CC`,
-`MYGO_ANDROID_PKG`, `MYGO_ANDROID_SO`):
+anywhere, they find the repo themselves). The scripts are **platform-adaptive**:
+`HOST_TAG` and the executable suffix come from `uname`, and the default SDK/JDK paths
+differ per platform (Windows `C:/Users/hzy/AppData/Local/Android/Sdk`, macOS
+`~/Library/Android/sdk`, Linux `~/Android/Sdk`). Everything is overridable by env
+(`ANDROID_HOME`/`ANDROID_SDK_ROOT`, `ANDROID_NDK_VERSION=28.2.13676358`, `JAVA_HOME`,
+`MYGO_ANDROID_CC`, `MYGO_ANDROID_PKG`, `MYGO_ANDROID_SO`, `MYGO_PYTHON`):
 
 ```sh
-bash scripts/android-doctor.sh          # toolchain self-check: SDK≥31 / NDK r28 / JDK 17 / CC / adb / emulator
+bash scripts/android-doctor.sh          # toolchain self-check: SDK≥31 / NDK r28 / JDK 17+ / CC / adb / emulator
 bash scripts/android-build.sh           # Go .so (c-shared) → 16KB align check → Gradle if android/ exists
 bash scripts/android-build.sh --so-only # the .so and its page-align check only
 bash scripts/android-run.sh             # adb install + am start + logcat
 bash scripts/android-egl-stress.sh      # 20x foreground/background + 10x rotation, blank-frame report
 ```
+
+**JDK: AGP 9.0.1 / Gradle 9.1.0 need JDK 17+; JDK 21 is what the Mac mini uses.**
+`brew install openjdk@21` is keg-only — export
+`JAVA_HOME=/opt/homebrew/opt/openjdk@21` (or the equivalent) before running Gradle.
 
 The `.so` is `GOOS=android GOARCH=arm64 CGO_ENABLED=1 go build -buildmode=c-shared`
 with the NDK r28 `aarch64-linux-android29-clang`; it lands in

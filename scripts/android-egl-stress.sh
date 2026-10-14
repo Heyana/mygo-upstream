@@ -4,8 +4,8 @@
 # 用法：
 #   scripts/android-egl-stress.sh [--fg-bg <n>] [--rotations <n>] [--component <pkg>/<activity>]
 #
-# 环境变量（默认值为本机实测值，均可覆盖）：
-#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根（默认 C:/Users/hzy/AppData/Local/Android/Sdk）
+# 环境变量（默认值为实测值，均可覆盖）：
+#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根（按平台取默认：macOS=~/Library/Android/sdk）
 #   MYGO_ANDROID_COMPONENT            组件名（默认 org.mygo.host/org.mygo.MygoActivity）
 #   MYGO_ANDROID_SHOTS                截图输出目录（默认 <repo>/.mygo/android/frames，已 gitignore）
 #   MYGO_EXPECT_HEX                   期望帧色（默认 1C1F29 = Go 侧 clear(0.11,0.12,0.16)）
@@ -17,9 +17,16 @@ set -u
 
 norm() { printf '%s' "${1//\\//}"; }
 
+# ---- 平台自适应（与 android-doctor.sh 同源）----------------------------------
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) EXE=".exe"; DEF_SDK="C:/Users/hzy/AppData/Local/Android/Sdk" ;;
+  Darwin)               EXE="";     DEF_SDK="$HOME/Library/Android/sdk" ;;
+  *)                    EXE="";     DEF_SDK="$HOME/Android/Sdk" ;;
+esac
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-C:/Users/hzy/AppData/Local/Android/Sdk}}")"
-ADB="$SDK/platform-tools/adb.exe"
+SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$DEF_SDK}}")"
+ADB="$SDK/platform-tools/adb$EXE"
 
 OUTDIR="${MYGO_ANDROID_SHOTS:-$REPO/.mygo/android/frames}"
 LOGTAG="${MYGO_ANDROID_LOGTAG:-mygo}"
@@ -78,7 +85,9 @@ EXPECT_COVER="${MYGO_EXPECT_COVER:-95}"   # 期望色占比下限（%）
 
 PYTHON_BIN="${MYGO_PYTHON:-}"
 if [ -z "$PYTHON_BIN" ]; then
+  # 跨平台候选：POSIX 下靠 PATH；Windows 另给本机实测的 venv 兜底。
   for c in python3 python "/c/Users/hzy/.workbuddy/binaries/python/envs/default/Scripts/python.exe"; do
+    if command -v "$c" >/dev/null 2>&1; then PYTHON_BIN="$(command -v "$c")"; break; fi
     if [ -x "$c" ]; then PYTHON_BIN="$c"; break; fi
   done
 fi

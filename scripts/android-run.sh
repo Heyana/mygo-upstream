@@ -4,8 +4,8 @@
 # 用法：
 #   scripts/android-run.sh [--apk <path>] [--component <pkg>/<activity>] [--log-seconds <n>]
 #
-# 环境变量（默认值为本机实测值，均可覆盖）：
-#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根（默认 C:/Users/hzy/AppData/Local/Android/Sdk）
+# 环境变量（默认值为实测值，均可覆盖）：
+#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根（按平台取默认：macOS=~/Library/Android/sdk）
 #   MYGO_ANDROID_APK                  APK 路径（默认 android/app/build/outputs/apk/debug/app-debug.apk）
 #   MYGO_ANDROID_COMPONENT            组件名 <applicationId>/<Activity>（默认 org.mygo.host/org.mygo.MygoActivity）
 #   MYGO_ANDROID_LOGTAG               logcat 过滤 tag（默认 mygo）
@@ -21,9 +21,16 @@ set -u
 
 norm() { printf '%s' "${1//\\//}"; }
 
+# ---- 平台自适应（与 android-doctor.sh 同源）----------------------------------
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) EXE=".exe"; DEF_SDK="C:/Users/hzy/AppData/Local/Android/Sdk" ;;
+  Darwin)               EXE="";     DEF_SDK="$HOME/Library/Android/sdk" ;;
+  *)                    EXE="";     DEF_SDK="$HOME/Android/Sdk" ;;
+esac
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-C:/Users/hzy/AppData/Local/Android/Sdk}}")"
-ADB="$SDK/platform-tools/adb.exe"
+SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$DEF_SDK}}")"
+ADB="$SDK/platform-tools/adb$EXE"
 
 APK="${MYGO_ANDROID_APK:-$REPO/android/app/build/outputs/apk/debug/app-debug.apk}"
 LOGTAG="${MYGO_ANDROID_LOGTAG:-mygo}"

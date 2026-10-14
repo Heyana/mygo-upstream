@@ -7,13 +7,15 @@
 #               （T2A 负责的安卓 Go 后端包；库名必须是 mygo，对应 System.loadLibrary("mygo")）
 #   --so-only   只编 .so + 校验对齐，不碰 Gradle
 #
-# 环境变量（默认值为本机实测值，均可覆盖）：
-#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根（默认 C:/Users/hzy/AppData/Local/Android/Sdk）
+# 环境变量（默认值为实测值，均可覆盖）：
+#   ANDROID_HOME / ANDROID_SDK_ROOT   SDK 根（按平台取默认，见脚本内）
 #   ANDROID_NDK_VERSION               NDK 目录名（默认 28.2.13676358）
 #   MYGO_ANDROID_CC                   C 交叉编译器（默认由 NDK 推导）
 #   MYGO_ANDROID_PKG                  默认 Go 包（默认 ./internal/android）
 #   MYGO_ANDROID_SO                   输出 .so 路径
-#   JAVA_HOME                         Gradle 用的 JDK（默认本机 JDK 17）
+#   JAVA_HOME                         Gradle 用的 JDK（默认取平台默认 / java_home）
+#
+# 平台自适应：HOST_TAG / 可执行后缀由 `uname` 推导，Windows(MSYS) 与 macOS/Linux 共用。
 #
 # 🔴 16KB 对齐：NDK r28 默认 align 2**14，**不加** CGO_LDFLAGS；本脚本只做校验。
 set -u
@@ -33,14 +35,38 @@ done
 
 norm() { printf '%s' "${1//\\//}"; }
 
+# ---- 平台自适应（与 android-doctor.sh 同源）----------------------------------
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    HOST_TAG="windows-x86_64"; EXE=".exe"; CLANG_SUFFIX=".cmd"
+    DEF_SDK="C:/Users/hzy/AppData/Local/Android/Sdk"; DEF_JDK="C:/Users/hzy/AppData/Local/Programs/Microsoft/jdk-17.0.10.7-hotspot" ;;
+  Darwin)
+    HOST_TAG="darwin-x86_64"; EXE=""; CLANG_SUFFIX=""
+    DEF_SDK="$HOME/Library/Android/sdk"; DEF_JDK="" ;;
+  *)
+    HOST_TAG="linux-x86_64"; EXE=""; CLANG_SUFFIX=""
+    DEF_SDK="$HOME/Android/Sdk"; DEF_JDK="" ;;
+esac
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-C:/Users/hzy/AppData/Local/Android/Sdk}}")"
+SDK="$(norm "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$DEF_SDK}}")"
 NDK_VER="${ANDROID_NDK_VERSION:-28.2.13676358}"
 NDK_DIR="$SDK/ndk/$NDK_VER"
-TOOLDIR="$NDK_DIR/toolchains/llvm/prebuilt/windows-x86_64/bin"
-CC="${MYGO_ANDROID_CC:-$TOOLDIR/aarch64-linux-android29-clang.cmd}"
-OBJDUMP="$TOOLDIR/llvm-objdump.exe"
-JDK="$(norm "${JAVA_HOME:-C:/Users/hzy/AppData/Local/Programs/Microsoft/jdk-17.0.10.7-hotspot}")"
+TOOLDIR="$NDK_DIR/toolchains/llvm/prebuilt/$HOST_TAG/bin"
+CC="${MYGO_ANDROID_CC:-$TOOLDIR/aarch64-linux-android29-clang$CLANG_SUFFIX}"
+OBJDUMP="$TOOLDIR/llvm-objdump$EXE"
+# JDK 探测顺序：显式 JAVA_HOME → /usr/libexec/java_home → homebrew keg-only（21/17 版）。
+if [ -z "${JAVA_HOME:-}" ]; then
+  if [ -x /usr/libexec/java_home ]; then
+    DEF_JDK="$(/usr/libexec/java_home 2>/dev/null || true)"
+  fi
+  if [ -z "$DEF_JDK" ]; then
+    for cand in /opt/homebrew/opt/openjdk@21 /opt/homebrew/opt/openjdk@17 /opt/homebrew/opt/openjdk; do
+      [ -x "$cand/bin/java" ] && { DEF_JDK="$cand"; break; }
+    done
+  fi
+fi
+JDK="$(norm "${JAVA_HOME:-$DEF_JDK}")"
 
 PKG="${PKG_ARG:-${MYGO_ANDROID_PKG:-./internal/android}}"
 
