@@ -91,6 +91,18 @@ func (w *window) SetAutoHideMenu(v bool) {}
 
 func (w *window) TitleBar() platform.TitleBar { return platform.TitleBar{} }
 
+// SafeArea is the room the device's chrome takes, which the Java host
+// reports through Native.onSafeArea (see jni.go). It is the phone's
+// counterpart to a desktop's TitleBar, and it is read from the backend
+// rather than computed here because only Android knows: a status bar's
+// height, a notch's shape, a gesture bar and a camera cutout are all the
+// system's, and they differ per device.
+func (w *window) SafeArea() platform.SafeArea {
+	w.b.mu.Lock()
+	defer w.b.mu.Unlock()
+	return w.b.safeArea
+}
+
 func (w *window) StartDrag() {}
 
 func (w *window) TitleBarDoubleClicked() {}

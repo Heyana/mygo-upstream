@@ -58,6 +58,9 @@ type host interface {
 	// as its language reads.
 	rightToLeft() bool
 	titleBar() TitleBar
+	// safeArea returns the room the device's chrome takes from the
+	// content: a status bar, a notch, a home indicator. Zero on a desktop.
+	safeArea() SafeArea
 	// vibrancy reports whether the window shows a material where the
 	// frames are transparent.
 	vibrancy() bool
@@ -290,6 +293,9 @@ type engine struct {
 	// was built. The host's repaintTimer asks for a frame at repaintDue,
 	// unless one came or was asked for since. held tells that what moves
 	// waits for the window to show.
+	// was built. repaintTimer asks for a frame at repaintDue, unless one
+	// came or was asked for since. held tells that what moves waits for
+	// the window to show.
 	animating  bool
 	repainting bool
 	repaintAt  time.Time
@@ -298,6 +304,15 @@ type engine struct {
 	painted    [3]float32
 	gen        uint64
 	repaintDue time.Time
+	// wanted is set by whatever asks for a frame — an event, a view that
+	// changed, a timer coming due — and cleared when the frame that consumed
+	// it is drawn. A surface frame that arrives with it false and nothing
+	// moving is a frame nothing wants and is dropped (see surfaceFrame).
+	wanted bool
+	// paintedFrame tells that a frame has been drawn at least once: a window
+	// that has never painted must paint, whatever asked (see surfaceFrame).
+	paintedFrame bool
+	repaintTimer *time.Timer
 	// late is set when lists built elements while laying out.
 	late bool
 	// revealIDs are the elements to scroll into view once the frame is
@@ -482,6 +497,11 @@ func (rt *engine) runFrame() {
 	appW := rt.insp.contentWidth(w)
 	rt.insp.lap(-1)
 	rt.c.titleBar = rt.host.titleBar()
+	// Read every frame like the title bar, and for a sharper reason: the
+	// safe area changes with the window (rotation, a soft keyboard, a
+	// fold), and a value cached at start-up would leave a page padded for
+	// the orientation it was built in.
+	rt.c.safeArea = rt.host.safeArea()
 	rt.c.vibrancy = rt.host.vibrancy()
 	rt.text.BeginFrame()
 	rt.gen = rt.text.Generation()
@@ -572,6 +592,13 @@ func (rt *engine) runFrame() {
 	}
 	rt.stats.lap(phasePaint)
 	rt.insp.lap(2)
+	rt.insp.lap(2) // Count the ops before the scene is handed over, and before the next
+	// frame resets it: the count is of this frame's paint, and what the
+	// raster and present phases then cost is divided by it.
+	//
+	// upstream's frameStats counts its phases in end() and has no setOps:
+	// the op count this called with came from a diagnostics pass that is
+	// kept in ui/diagnostics.go, which reads the scene itself.
 	rt.host.present(&rt.scene)
 	rt.placeWebViews()
 	rt.stats.lap(phasePresent)

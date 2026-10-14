@@ -5,6 +5,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.WindowInsets
 import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -68,6 +69,10 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         // 可编辑元素拿到键盘时唤起软键盘。必须在第一次要 InputConnection 之前登记，
         // 所以放 init 而不是 onCreateInputConnection（那时系统还没被要求弹键盘）。
         MygoIme.bindView(this)
+        // requestApplyInsets 放在 onAttachedToWindow，不能放这里：
+        // 系统只给**已经 attach 到窗口**的 View 派发 inset，构造函数里调
+        // 是一次空操作（实测：这么写 nativeOnSafeArea 一次都没被调用，
+        // Go 侧的 safe area 恒为零）。见 onAttachedToWindow。
         // 保持这一层 View 极简：SurfaceView 之下不再叠别的 View。
         // 🔴 不要在 setContentView(SurfaceView) 之后又往同一个容器里加会改变
         //    surface z-order 语义的 View（那会让 SurfaceView 从「独立合成层」
@@ -104,6 +109,71 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         // View 尺寸（含 inset/装饰偏移后的实际可用区）与 Surface 尺寸可能不同，
         // 两者都转给 Go 侧，由 Go 侧决定以哪个为准（这里不做取舍，避免丢信息）。
         Native.onSizeChanged(w, h)
+        // 尺寸变了 inset 也可能变（旋转、分屏、键盘）。这里再报一次是**必须**的：
+        // onApplyWindowInsets 只在 inset 真正变化时被系统调用，而旋转时
+        // 状态栏从上面跑到侧面、手势条从下面跑到侧面，值变了但系统未必重发。
+        reportSafeArea()
+    }
+
+    // ─────────────────── 系统栏让位（safe area） ───────────────────
+
+    /**
+     * attach 之后才能要到 inset。
+     *
+     * 🔴 这个重写是必需的，不是保险：`requestApplyInsets()` 在构造函数里是
+     * **空操作** —— 系统只给已 attach 的 View 派发 WindowInsets，而 View 在
+     * `setContentView` 之前还没 attach。第一版把它放在 init 里，症状是
+     * `nativeOnSafeArea` 一次都没被调用（logcat 里搜不到），Go 侧 safe area
+     * 恒为零，页面照样压在状态栏下 —— 而"没调"和"调了但是零"在画面上
+     * 长得一模一样，只能靠日志分辨。
+     */
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        requestApplyInsets()
+    }
+
+    /**
+     * 把系统栏占掉的区域报给 Go 侧。这是**唯一**一个"系统画在我们上面"的信息来源：
+     *
+     *  · 本 App 的 theme 是 `Theme.Black.NoTitleBar.Fullscreen`，内容从屏幕
+     *    左上角开始画 —— 状态栏、刘海、手势条**都压在内容上**。
+     *  · Go 的布局引擎看不见任何系统栏，它只知道自己的画布有多大。
+     *    所以"内容该躲开哪几边、躲多少"只能在 Java 侧问系统，再由 Go 侧用。
+     *
+     * 单位换算：WindowInsets 的 getInsets() 给的是**设备像素**，而 Go 的布局
+     * 是 DIP（与 CSS px 同量级）。这里除以 density 后再报，Go 侧拿到的就是
+     * 能直接当 padding 用的值。四舍五入而不是取整：3.5 DIP 取 3 会让内容
+     * 差半个像素压在栏下，取 4 只是多 0.5 的留白。
+     *
+     * 为什么用 `getInsets` 家族而不是 `getSystemWindowInsets`（后者已废弃）：
+     *  · systemBars() = 状态栏 + 导航栏 + 灵动岛（displayCutout 之外的那部分）
+     *  · displayCutout() = 刘海/挖孔
+     *  两者取并集才是"设备自己画的、会压住内容的东西"。IME（键盘）**不算**：
+     *  它不是设备画的，而是用户唤起的，且有独立的 adjustResize 路径
+     *  （Manifest 里 windowSoftInputMode=adjustResize），混进来会让布局
+     *  在键盘弹出时平白缩一圈。
+     */
+    private fun reportSafeArea() {
+        val insets = rootWindowInsets ?: return
+        val d = resources.displayMetrics.density
+        if (d <= 0f) return
+        val bars = insets.getInsets(WindowInsets.Type.systemBars())
+        val cut = insets.getInsets(WindowInsets.Type.displayCutout())
+        fun dip(px: Int): Int = Math.round(px / d)
+        Native.onSafeArea(
+            dip(maxOf(bars.top, cut.top)),
+            dip(maxOf(bars.right, cut.right)),
+            dip(maxOf(bars.bottom, cut.bottom)),
+            dip(maxOf(bars.left, cut.left)),
+        )
+    }
+
+    override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
+        super.onApplyWindowInsets(insets)
+        // 不消费（不 return CONSUMED）：本 View 不做让位，只把值读出来交给
+        // Go 侧，让位由 Go 的布局做。消费掉会让同一层级的其它 View 拿不到。
+        reportSafeArea()
+        return insets
     }
 
     // ─────────────────── 触摸 ───────────────────

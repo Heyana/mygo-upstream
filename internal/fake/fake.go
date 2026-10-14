@@ -520,6 +520,8 @@ type Window struct {
 	// TitleBarRoom is what TitleBar returns: set for windows with a hidden
 	// title bar, and changed by tests before they call H.TitleBarChanged.
 	TitleBarRoom platform.TitleBar
+	// SafeAreaRoom is what SafeArea returns, which SetSafeArea sets.
+	SafeAreaRoom platform.SafeArea
 	// AsyncFunction answers CallAsyncFunction.
 	AsyncFunction func(body string) (string, error)
 	// AsyncCallback, when set, receives CallAsyncFunction calls to answer
@@ -619,6 +621,14 @@ func (w *Window) TitleBar() platform.TitleBar {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.TitleBarRoom
+}
+
+// SafeArea returns what the test set with SetSafeArea, for the tests that
+// drive a window as a phone lays one out.
+func (w *Window) SafeArea() platform.SafeArea {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.SafeAreaRoom
 }
 
 func (w *Window) Handle() uintptr        { return 1 }
@@ -1119,6 +1129,16 @@ func (b *Backend) SetSystemLanguages(tags ...string) {
 	}
 	b.mu.Unlock()
 	b.h.LocaleChanged()
+}
+// SetSafeArea makes the window report a device's chrome taking room, as a
+// phone does: a status bar at the top, a home indicator at the bottom. It
+// reports the change the way a device does, through the window's handler,
+// so a view that pads by the safe area is laid out again.
+func (b *Backend) SetSafeArea(w *Window, a platform.SafeArea) {
+	w.mu.Lock()
+	w.SafeAreaRoom = a
+	w.mu.Unlock()
+	w.H.SafeAreaChanged()
 }
 
 // SetSystemRegion changes the user's regional formats, as the user does

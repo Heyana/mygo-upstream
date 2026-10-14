@@ -942,6 +942,14 @@ func (w *window) TitleBar() platform.TitleBar {
 	return platform.TitleBar{Height: int(math.Round(height)), Left: int(math.Ceil(z.Origin.X + z.Size.Width))}
 }
 
+// SafeArea is zero on macOS. The menu bar and the Dock live outside the
+// window, and a window under a notch has its content laid out below it by
+// the system (the window's own frame starts under the menu bar), so
+// nothing the system draws comes over the content — which is what a safe
+// area would describe. A hidden title bar is a different thing and is
+// TitleBar's.
+func (w *window) SafeArea() platform.SafeArea { return platform.SafeArea{} }
+
 func (w *window) TitleBarDoubleClicked() {
 	var action string
 	withPool(func() {

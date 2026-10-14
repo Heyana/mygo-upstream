@@ -35,6 +35,56 @@ ui.Row(c).Height(max(bar.Height, 32)).Padding(0, bar.Right+12, 0, bar.Left+12).D
 In a `Frameless` window, `DragWindow` makes an element move the window, and
 a double click on it maximizes the window.
 
+## The safe area
+
+`c.SafeArea()` returns the room the **device's** own chrome takes from the
+content: a status bar or a notch at the top, a home indicator or a gesture
+bar at the bottom, a rounded corner or a camera cutout at either side. Keep
+what must be read clear of it, and let the background run under it:
+
+```go
+a := c.SafeArea()
+ui.Column(c).Fill().Background(c.Theme().Background).Padding(a.Top, a.Right, a.Bottom, a.Left).Children(func() {
+	app.page(c)
+})
+```
+
+It is zero on a desktop, where the system draws outside the window and the
+content area is the content area — so a layout that pads by it needs no
+branch and is pixel-identical off a phone.
+
+### Title bar or safe area?
+
+They are different questions and a window can have both answers:
+
+|  | `c.TitleBar()` | `c.SafeArea()` |
+|---|---|---|
+| Whose chrome | **this window's** controls (macOS traffic lights, Windows caption buttons) | **the device's** (status bar, notch, gesture bar) |
+| When zero | other windows, and in full screen | desktops; never on a phone |
+| Can the app avoid it | yes — don't ask for a hidden title bar | no — the system draws it over the window |
+| Changes when | the window enters full screen, the button layout changes | the device rotates, a keyboard shows, the window moves displays |
+
+A phone in full screen has a **zero** title bar and a **non-zero** safe
+area, which is the case that says they are not the same thing.
+
+### Reading it every frame
+
+Read it in the view, as `c.SafeArea()` — not once at start-up. It changes
+with the window: a rotation moves the cutout from the top to a side, a soft
+keyboard takes the bottom, a fold changes everything. A value remembered
+from the first frame leaves a page padded for the orientation it was built
+in.
+
+Behind it: `platform.SafeArea` is what a backend fills in (Android reports
+it from the window's `WindowInsets`, every other backend returns zero), the
+window's handler reports changes through `SafeAreaChanged`, and package ui
+reads it at the top of every frame (`ui/runtime.go`).
+
+⚠️ **A page drawn into the overlay layer places itself.** `c.SafeArea()`
+covers elements in the normal flow, where padding reaches them;
+`ui.Overlay` elements are positioned against the window, so a panel or a
+drawer built there has to add the inset to its own `Top`/`Left`.
+
 ## Vibrancy
 
 A window's `Vibrancy` shows wherever its native UI draws no background, on

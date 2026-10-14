@@ -51,6 +51,20 @@ type Rect struct{ X, Y, Width, Height int }
 // top edge, Left wide from the left edge and Right wide from the right.
 type TitleBar struct{ Height, Left, Right int }
 
+// SafeArea is the room the system's own chrome takes from a window's
+// content, in DIPs: a status bar or a notch at the top, a home indicator
+// or a gesture bar at the bottom, and a rounded corner or a camera cutout
+// at either side.
+//
+// It is the phone's TitleBar, and it is a different question: a TitleBar is
+// the controls of *this* window, which an app can hide; a SafeArea is the
+// device's, which an app draws under and must keep clear of.
+//
+// A desktop window has none of them — there the system draws outside the
+// content — so every field is 0 and content laid out at the window's edge
+// is correct.
+type SafeArea struct{ Top, Right, Bottom, Left int }
+
 // Color is an 8-bit RGBA color.
 type Color struct{ R, G, B, A uint8 }
 
@@ -474,6 +488,13 @@ type Window interface {
 	// changes of. It is zero for other windows and while the controls are
 	// hidden, in full screen.
 	TitleBar() TitleBar
+	// SafeArea returns the room the device's own chrome takes from the
+	// content: the status bar, a notch, the home indicator, a rounded
+	// corner. It is zero on a desktop, where the system draws outside the
+	// window; on a phone it is what content must keep clear of, and
+	// WindowHandler.SafeAreaChanged reports changes of it (a rotation, a
+	// keyboard showing, a fold).
+	SafeArea() SafeArea
 	// StartDrag moves the window with the mouse (frameless drag regions).
 	StartDrag()
 	// TitleBarDoubleClicked performs the platform action for a double click
@@ -605,6 +626,10 @@ type WindowHandler interface {
 	// TitleBarChanged is called when Window.TitleBar changes, e.g. when the
 	// window enters full screen or the desktop's button layout changes.
 	TitleBarChanged()
+	// SafeAreaChanged is called when Window.SafeArea changes: the device
+	// rotated, a keyboard came up or went away, or the window moved to
+	// another display.
+	SafeAreaChanged()
 
 	// Message delivers a message posted by the renderer bridge.
 	Message(msg string)

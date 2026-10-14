@@ -40,8 +40,11 @@ type headless struct {
 	openErr error
 	// later are what the view asked to run after the frame, as a window
 	// posts them to the main thread.
-	later  []func()
-	bar    TitleBar
+	later []func()
+	bar   TitleBar
+	// safe is the room the device's chrome takes, which a test sets with
+	// SetSafeArea to lay a page out as a phone would.
+	safe   platform.SafeArea
 	access *platform.AccessTree
 	// told are the announcements of the trees, and announced those the
 	// view made.
@@ -173,7 +176,10 @@ func (h *headless) invalidate() {
 	h.invalidated.Store(true)
 	h.requested.Store(true)
 }
-
+func (h *headless) safeArea() SafeArea {
+	a := h.safe
+	return SafeArea{Top: float32(a.Top), Right: float32(a.Right), Bottom: float32(a.Bottom), Left: float32(a.Left)}
+}
 // openURL notes the link, and gives done the error FailOpenURL set before
 // the next frame, as a window gives it after the system opened the link.
 func (h *headless) openURL(u string, done func(error)) {
@@ -380,6 +386,21 @@ func (t *Tester) SetScale(scale float32) {
 // title bar take, which Context.TitleBar returns.
 func (t *Tester) SetTitleBar(bar TitleBar) {
 	t.h.bar = bar
+	t.Frame()
+}
+
+// SetSafeArea sets the room the device's own chrome takes from the content
+// (a status bar, a notch, a home indicator), which Context.SafeArea
+// returns. A test uses it to lay a page out as a phone would:
+//
+//	tester.SetSafeArea(ui.SafeArea{Top: 24, Bottom: 48})
+func (t *Tester) SetSafeArea(a SafeArea) {
+	t.h.safe = platform.SafeArea{
+		Top:    int(a.Top),
+		Right:  int(a.Right),
+		Bottom: int(a.Bottom),
+		Left:   int(a.Left),
+	}
 	t.Frame()
 }
 

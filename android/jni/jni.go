@@ -129,3 +129,18 @@ func Java_org_mygo_Native_nativeOnSizeChanged(env *C.JNIEnv, clazz C.jclass, w, 
 	androidLog("onSizeChanged %dx%d", int(w), int(h))
 	theBackend.OnSizeChanged(int(w), int(h))
 }
+
+// Java_org_mygo_Native_nativeOnSafeArea is nativeOnSafeArea: the room the
+// device's chrome takes from the content, in DIPs — the status bar, a
+// notch, the home indicator, a rounded corner.
+//
+// The host computes it (MygoView.reportSafeArea) because only Android
+// knows: the heights differ per device, and the density it has to be
+// divided by lives on the Java side. Go's layout works in DIPs and takes
+// what it is given.
+//
+//export Java_org_mygo_Native_nativeOnSafeArea
+func Java_org_mygo_Native_nativeOnSafeArea(env *C.JNIEnv, clazz C.jclass, top, right, bottom, left C.jint) {
+	androidLog("onSafeArea top=%d right=%d bottom=%d left=%d", int(top), int(right), int(bottom), int(left))
+	theBackend.OnSafeArea(int(top), int(right), int(bottom), int(left))
+}

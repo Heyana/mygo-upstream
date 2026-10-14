@@ -1713,6 +1713,23 @@ func (h *windowHandler) TitleBarChanged() {
 	}
 }
 
+// SafeAreaChanged is called when the room the device's chrome takes
+// changes: a rotation, a soft keyboard, a fold, a window moved to another
+// display.
+//
+// 🔴 It does not send anything to a page the way TitleBarChanged sends the
+// room to a web view's, because nothing has to be told: package ui reads
+// the safe area from the window at the top of every frame (runtime.go),
+// and a frame is all this has to ask for. That is the cheaper half of the
+// pair and the one that cannot be missed — a page told through the bridge
+// can be a document that has not loaded yet, while a frame is drawn by
+// whichever content the window has.
+func (h *windowHandler) SafeAreaChanged() {
+	if c := h.w.conn; c != nil && c.SafeAreaChanged != nil {
+		c.SafeAreaChanged()
+	}
+}
+
 func (h *windowHandler) Message(msg string) { h.w.handleMessage(msg) }
 
 func (h *windowHandler) WillNavigate(nav platform.Navigation) bool {

@@ -100,6 +100,11 @@ type Backend struct {
 	// frameQueued coalesces frame requests: a request made while one is
 	// already queued is the same frame (see frame.go).
 	frameQueued atomic.Bool
+
+	// safeArea is the room the device's chrome takes, which Java reports
+	// through Native.onSafeArea. Guarded by mu: it is written on Java's
+	// thread (the JNI callback) and read on the pump's.
+	safeArea platform.SafeArea
 }
 
 // New returns the Android backend, creating it on first use.
@@ -387,6 +392,33 @@ func (b *Backend) OnTouch(action int, x, y float32, eventTimeMs int64) {
 // ui is wired.
 func (b *Backend) OnKey(keyCode, action, metaState int) {
 	b.Post(func() { b.key(keyCode, action, metaState) })
+}
+
+// OnSafeArea records the room the device's chrome takes, in DIPs, which
+// Java reports from the window's WindowInsets.
+//
+// 🔴 It stores before posting, unlike the On* methods above, and that is
+// deliberate. Those queue work that *changes* the backend, and the pump is
+// where backend state may be touched. This one changes a value that a frame
+// reads, and the frame it must be visible to is the one the same Java
+// callback asks for — so the store happens on the calling thread (under mu,
+// which is what makes it safe there) and the post only requests the frame.
+// Queueing the store instead would let a frame be built from the previous
+// insets, which on a rotation is a page laid out for the old orientation.
+func (b *Backend) OnSafeArea(top, right, bottom, left int) {
+	b.mu.Lock()
+	b.safeArea = platform.SafeArea{Top: top, Right: right, Bottom: bottom, Left: left}
+	b.mu.Unlock()
+	// Ask for the frame this is for, through the window's handler — the
+	// same path a title bar change takes. The window may not exist yet (the
+	// first insets arrive with the surface, before App.Run makes one), and
+	// then there is nothing to ask: the frame that runs once it does reads
+	// the value stored above.
+	b.Post(func() {
+		if b.win != nil {
+			b.win.h.SafeAreaChanged()
+		}
+	})
 }
 
 // surfaceCreated (pump) adopts the ANativeWindow of a (re)created surface. The

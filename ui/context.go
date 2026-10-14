@@ -28,6 +28,7 @@ type context struct {
 	now      time.Time
 	w, h     float32
 	titleBar TitleBar
+	safeArea SafeArea
 	vibrancy bool
 	overlay  *node
 	nextKey  any
@@ -346,6 +347,24 @@ func (c *context) Size() (width, height float32) { return c.w, c.h }
 // top edge, Left wide from the left edge and Right wide from the right.
 type TitleBar struct{ Height, Left, Right float32 }
 
+// SafeArea is the room the device's own chrome takes from the content, in
+// DIPs, which Context.SafeArea returns. It mirrors platform.SafeArea: the
+// platform type is what a backend fills in, this is what a view reads, and
+// the two are separate for the same reason ui.TitleBar and
+// platform.TitleBar are — the platform type is the contract between Go and
+// the host, and this one is the API a view uses, in the floats the layout
+// works in.
+type SafeArea struct{ Top, Right, Bottom, Left float32 }
+
+// Inset returns the area with d DIPs added to every side, which is what a
+// control draws to keep a target off the system's chrome:
+//
+//	a := c.SafeArea()
+//	a = a.Inset(8)
+func (a SafeArea) Inset(d float32) SafeArea {
+	return SafeArea{Top: a.Top + d, Right: a.Right + d, Bottom: a.Bottom + d, Left: a.Left + d}
+}
+
 // TitleBar returns the room the window controls take in a window with a
 // hidden title bar (mygo.WindowOptions.TitleBarStyle), whose view draws
 // the title bar under them: the traffic lights on macOS, the window
@@ -356,6 +375,23 @@ type TitleBar struct{ Height, Left, Right float32 }
 //	bar := c.TitleBar()
 //	ui.Row(c).Height(max(bar.Height, 32)).Padding(0, bar.Right, 0, bar.Left).DragWindow()
 func (c *context) TitleBar() TitleBar { return c.titleBar }
+
+// SafeArea is the room the device's own chrome takes from the content, in
+// DIPs: a status bar or a notch at the top, a home indicator or a gesture
+// bar at the bottom, a rounded corner or a camera cutout at either side.
+//
+// It is zero on a desktop, where the system draws outside the window, and
+// non-zero on a phone and on a tablet — including in a window that fills
+// the screen, where the status bar is drawn *over* it. A page that wants
+// its content inside the safe area pads by it:
+//
+//	a := c.SafeArea()
+//	ui.Column(c).Fill().Padding(a.Top, a.Right, a.Bottom, a.Left)
+//
+// A page that wants its background to run under the system's chrome (a
+// photo viewer, a video) draws its background at the window's edge and
+// pads only what must stay clear of it — the same split as a TitleBar.
+func (c *context) SafeArea() SafeArea { return c.safeArea }
 
 // Vibrancy reports whether the window shows its material
 // (mygo.WindowOptions.Vibrancy) wherever the view draws no background: on

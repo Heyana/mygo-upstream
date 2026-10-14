@@ -32,11 +32,30 @@
          留着是因为 debug 包才需要它。 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      【主题：普通 app，不隐藏系统栏】
+
+      🔴 原值是 `Theme.Black.NoTitleBar.Fullscreen`，那个 `Fullscreen` 的语义是
+      **隐藏状态栏**（windowFullscreen=true）。它来自「这是个 demo，画面越大越好」
+      的阶段，而一个普通 app 不该这样：用户要看时间、电量、通知，手势条也要在。
+
+      现在的取舍：
+        · NoTitleBar  —— 不要 ActionBar。本 app 自己画顶栏（见 lab/shell.go），
+                         系统再画一条会占掉一整行，且样式与本 app 的 token 无关。
+        · 不 Fullscreen —— 状态栏与手势条都显示。
+        · layoutInDisplayCutoutMode=shortEdges + 透明状态栏（values-v27 里）
+          —— 内容铺到屏幕边缘（图片/视频页要这个），但 Go 侧用
+          ui.SafeArea 把内容躲开系统栏（见 MygoView.reportSafeArea）。
+                          「内容铺满」和「内容躲开」是两件事，前者靠主题，后者靠布局。
+
+      旧行为（隐藏系统栏）不是不能要，而是它属于全屏类 app（播放器、游戏），
+      那时应当由那个 Activity 自己声明。见 MygoActivity 里对 flags 的注释。
+    -->
     <application
         android:allowBackup="false"
         android:label="mygo"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        android:theme="@style/MygoTheme">
 
         <activity
             android:name=".MygoActivity"
