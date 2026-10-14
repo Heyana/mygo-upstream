@@ -192,6 +192,28 @@ func (e *eglState) swap() bool {
 	return C.eglSwapBuffers(e.display, e.surface) == C.EGL_TRUE
 }
 
+// setSwapInterval sets how many vsyncs eglSwapBuffers waits for before it
+// returns: 1 is the default and means "return with the next vsync", 0 means
+// "return as soon as the buffer is handed over".
+//
+// 🔴 Why this is worth a knob rather than a line. With interval 1 the swap is
+// where the whole frame's pacing shows up: measured on a 60 Hz Adreno 830, a
+// frame that submits just after a vsync waits almost a full interval for the
+// next one, and the reading is 7.9 ms against 0.4 ms for the same frame in a
+// steady stream. That number is not work and it is not a fault — it is the
+// frame arriving off-phase. Only the interval 0 reading says what the frame
+// itself costs, so the two readings together are what tell "the frame is
+// slow" from "the frame is early".
+//
+// The lab drives this at run time through its /debug/set endpoint, so both
+// readings come from one build; see cmd/lab/pprof_android.go.
+func (e *eglState) setSwapInterval(n int) {
+	if e.display == C.EGL_NO_DISPLAY || e.surface == C.EGL_NO_SURFACE {
+		return
+	}
+	C.eglSwapInterval(e.display, C.EGLint(n))
+}
+
 // viewport sets the GL viewport to the surface's device pixels.
 func (e *eglState) viewport(w, h int) {
 	C.glViewport(0, 0, C.GLint(w), C.GLint(h))

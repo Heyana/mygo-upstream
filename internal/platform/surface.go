@@ -97,6 +97,23 @@ type IdleSurface interface {
 	Idle()
 }
 
+// SwapIntervalSurface is a Surface whose present blocks until a vsync, and
+// which can be told not to (Android's EGL). Optional because only EGL works
+// this way: GTK's area and a Windows swap chain present on their own
+// schedule and have no interval to set.
+//
+// It exists for measurement: with the interval at its default the present
+// span reads the frame's waiting, which is the frame's *pacing* and not its
+// work — a frame that lands just after a vsync waits most of an interval,
+// one in a steady stream waits almost none. Setting it to 0 separates the
+// two, and the pair of readings is what says whether a frame is slow or
+// merely early.
+type SwapIntervalSurface interface {
+	// SetSwapInterval is how many vsyncs the present waits for: 1 is the
+	// default and 0 returns as soon as the buffer is handed over.
+	SetSwapInterval(n int)
+}
+
 // FramePresenter is a surface whose frames drawn on the GPU need showing
 // when the renderer is done with them. EGL is such a renderer: unlike GTK's
 // GtkGLArea (which swaps for its area) and a Windows swap chain (which

@@ -61,6 +61,16 @@ func (s *Surface) Size() (width, height, scale float64) {
 	return float64(s.width) / scale, float64(s.height) / scale, scale
 }
 
+// SetSwapInterval tells eglSwapBuffers how many vsyncs to wait for. 1 is the
+// default; 0 makes it return as soon as the buffer is handed over, which is
+// how the frame's own cost is read apart from its pacing (see
+// eglState.setSwapInterval).
+//
+// It is platform.SwapIntervalSurface, reached by an optional type assertion
+// rather than through the Surface interface, because only EGL has an
+// interval to set.
+func (s *Surface) SetSwapInterval(n int) { s.egl.setSwapInterval(n) }
+
 // PresentPixels shows a frame drawn in memory: premultiplied BGRA rows of
 // stride bytes, width×height device pixels.
 //

@@ -48,6 +48,56 @@ wire protocol, TypeScript generation, and the checklist for adding features.
   in the PR, and find its cause with `-dumpdep` ("Binary size" in the
   architecture guide).
 
+- **A probe that reads zero is a claim to verify, not a result.** The probes
+  (`ui.Probe`, `internal/probe`) name spans on a stack, so a name that never
+  appears in a readout means its call site was never reached — not that the
+  work is free. Check `calls` before drawing a conclusion from an absent
+  name, and when it is 0, find out why: the usual cause is a probe on a
+  function nothing calls, because the page goes through a method or a wrapper
+  of the same name. Two live examples from one afternoon, both of which cost
+  hours because the absence was explained away as "the cache hit":
+  `class.ApplyAt` is probed on the package-level function while `u.Row(...)`
+  reaches the *method* of the same name on `*Cls`; `leaf.textLayout` runs in
+  the `layout` phase while its rasterizer runs in `paint`, so a reading of
+  one says nothing about the other.
+- **Measure the whole account, not the parts you already suspect.** A phase
+  whose parts do not sum to it cannot be diagnosed, and the missing part is
+  usually in code outside the package being looked at. `build` read 0.89 ms
+  while its probed parts summed to 0.03 ms; the other 97% was class-name
+  resolution in `mygo-wind`, reached through a call the probe did not cover.
+- **A frame-interval-dependent number is not a floor — it is the pipeline's
+  temperature.** Every span that touches the GPU's sync points (`gpu/clear`,
+  `gpu/swap`) measures how long the CPU waited for the driver, and that wait
+  is a function of how recently the last frame was submitted. It is therefore
+  reported differently at 1 Hz and at 85 Hz, and neither reading is "the cost
+  of the operation". Measured on Adreno 830, same page, same scene, only the
+  driver changed: `total` 5.07 → 1.35 ms, `swap` 1.17 → 0.37 ms, `gpu/clear`
+  0.361 → 0.095 ms, between a 1 Hz idle frame and a touched frame at a 23 ms
+  interval. The 1 Hz case is the slower one, because a second between swaps
+  empties the command queue and the next frame pays a cold pipeline; a steady
+  stream of frames keeps it warm. So a still page's "expensive" frame is
+  expensive **because** it is still: the HUD panel's own `c.After(1 s)` is
+  what creates it, and turning the panel off removes the frames entirely.
+  Before calling any GPU-touching span a floor, say at what frame interval
+  it was read.
+- **A present that waits is a symptom of a late frame, not the cost of
+  presenting.** The two are told apart by what the wait does when the frame's
+  pacing is removed, and the way to remove it is not to trust the number but
+  to change the condition. Measured on Adreno 830: `eglSwapInterval(0)` left
+  the wait unchanged — p50 0.38 ms and 9% of frames over 4 ms, against 8%
+  with the interval at 1 — so the wait is **not** EGL's vsync wait, whatever
+  it looks like. What it tracks is the interval since the previous frame:
+  55 ms before a 7.9 ms wait, 19 ms before a 0.4 ms one, and with no input at
+  all 23 ms between frames and 0.42 ms in the wait. A frame that arrives late
+  leaves buffers queued behind it, and the next submit reads that queue as
+  its own waiting. Three conclusions follow, and the third is the one easy to
+  get wrong: the 7.9 ms is not work; it is not a floor either; and a spike
+  that only appears while a test fixture drives input — `adb shell input
+  swipe` costs about 50 ms a round trip — is the fixture's pace until proven
+  otherwise, not the app's. Say which of the two a spike belongs to before
+  optimizing it, and prefer a fixture that drives input in one call
+  (`input motionevent DOWN/MOVE/UP`) over one that shells out per event.
+
 ## Commands
 
 ```sh
