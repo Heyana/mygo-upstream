@@ -68,8 +68,12 @@ object MygoInput {
     /**
      * 屏幕密度（resources.displayMetrics.densityDpi），每英寸多少 dot。
      * Go 侧据此把 view 像素换算成 DIP。没有它时按 160 处理（1:1）。
+     *
+     * @param refreshHz 当前显示器模式的刷新率（Hz）。Go 侧用它给帧的节奏
+     *   定基准；面板会自己降档（静止 60Hz、触摸 120Hz），所以这里报的是
+     *   **这一刻这一档**，不是面板的上限。拿不到时传 0，Go 侧按"未知"处理。
      */
-    external fun nativeOnDisplayInfo(dpi: Int)
+    external fun nativeOnDisplayInfo(dpi: Int, refreshHz: Float)
 
     /**
      * 一个完整的 MotionEvent。
@@ -117,9 +121,9 @@ object MygoInput {
     // ───────────────────────── 包内转发入口（非 native，可自由改）─────────────────────────
 
     /** 由 MygoView 在 surfaceChanged 时调用（也与 onSizeChanged 同源）。 */
-    fun onDisplayInfo(dpi: Int) {
+    fun onDisplayInfo(dpi: Int, refreshHz: Float) {
         if (dpi > 0) {
-            nativeOnDisplayInfo(dpi)
+            nativeOnDisplayInfo(dpi, refreshHz)
         }
     }
 

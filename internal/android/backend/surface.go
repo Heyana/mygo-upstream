@@ -102,9 +102,16 @@ func (s *Surface) PresentPixels(pix []byte, stride, width, height int) {
 	s.egl.swap()
 }
 
-// RefreshRate returns 0: the skeleton does not ask the display its rate
-// yet, and 0 means unknown in this interface.
-func (s *Surface) RefreshRate() float64 { return 0 }
+// RefreshRate returns how many times a second the display showing this
+// surface refreshes, from the rate the Activity last reported (see
+// SetDisplayRefreshRate), or 0 when nothing has.
+//
+// 🔴 It is not the panel's maximum. Android picks a mode per window and
+// moves between them — an idle page on a 120 Hz panel is shown at 60 — so
+// this is the rate the window is being driven at now, which is the number
+// the engine's pacing needs. The maximum is asked for separately, once, in
+// MygoView.requestMaxRefreshRate.
+func (s *Surface) RefreshRate() float64 { return DisplayRefreshRate() }
 
 // SetCursor does nothing: touch devices show no pointer over the surface.
 func (s *Surface) SetCursor(platform.Cursor) {}

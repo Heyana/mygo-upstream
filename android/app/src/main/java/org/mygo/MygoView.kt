@@ -1,8 +1,11 @@
 package org.mygo
 
+import android.app.Activity
 import android.content.Context
+import android.os.Build
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.WindowInsets
@@ -93,7 +96,62 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         Native.onSurfaceChanged(width, height, resources.displayMetrics.densityDpi)
         // 触摸坐标是 view 像素，Go 侧要换算成 DIP；密度的唯一来源就是这里。
         // 与 onSurfaceChanged 同一个值一起报过去，两者不会不一致。
-        MygoInput.onDisplayInfo(resources.displayMetrics.densityDpi)
+        // refreshHz 同源：先要最高档，再把"这一档是多少"报给 Go（见下）。
+        //
+        // 🔴 面板会自己降频（空闲 60Hz、触摸升到 120Hz），而 SurfaceView 自绘**不走**
+        // Android 的帧管线，系统没有任何理由替我们提频 —— 不提就一直是它当下的那一档。
+        // 实测：dumpsys SurfaceFlinger --latency 首行静止时 16666667（60Hz），
+        // 一触摸变成 8333333（120Hz），而 FramePhases 量到的帧间隔在 55ms 上下，
+        // 即量的是系统给的那一档，不是面板的能力。所以两件事都要做：
+        // requestMaxRefreshRate() 去要最高档，currentRefreshRate() 把结果报给 Go。
+        requestMaxRefreshRate()
+        MygoInput.onDisplayInfo(resources.displayMetrics.densityDpi, currentRefreshRate())
+    }
+
+    /**
+     * 当前 display 模式的刷新率（Hz），拿不到时 0。
+     *
+     * 取 `display.mode.refreshRate` 而不是 `display.refreshRate`：前者是
+     * "这个窗口现在挂在哪个 mode 上"，后者在旧 API 上是"首选模式"，
+     * 在自适应刷新率的设备上两者可以不同 —— 我们要的是前者。
+     */
+    private fun currentRefreshRate(): Float {
+        val d = display ?: return 0f
+        return d.mode?.refreshRate ?: 0f
+    }
+
+    /**
+     * 让系统知道这块 surface 想以面板的最高刷新率出帧。
+     *
+     * 两件事一起做，因为 Android 上是两个独立的开关：
+     *  · WindowManager.LayoutParams.preferredDisplayModeId 选**显示模式**
+     *    （面板档位），API 23 起可用 —— 这是真正切档的那一下。
+     *  · Surface.setFrameRate(...) 告诉 SurfaceFlinger 这块 buffer 的
+     *    期望节奏（API 30 起）。只设前者，合成器仍可能按旧档调度。
+     *
+     * 都做了版本守卫：minSdk 是 24，两个 API 分别在 23 / 30，低版本直接跳过 ——
+     * 那时面板通常只有一个档，也就没有"提频"这回事。
+     *
+     * 用 FIXED_SOURCE 而不是 default：这是渲染内容自己的节奏，不是"跟着触摸走"；
+     * 用 default 的话松手就掉回 60Hz，量到的数又变了。
+     */
+    private fun requestMaxRefreshRate() {
+        val d = display ?: return
+        val best = d.supportedModes.maxByOrNull { it.refreshRate } ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // 窗口上选模式，不是 surface 上：SurfaceView 的模式由宿主
+            // WindowManager 决定，直接改 surface 会被合成器忽略。
+            val activity = context as? Activity ?: return
+            activity.window.attributes = activity.window.attributes.apply {
+                preferredDisplayModeId = best.modeId
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            holder.surface?.setFrameRate(
+                best.refreshRate,
+                Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE
+            )
+        }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {

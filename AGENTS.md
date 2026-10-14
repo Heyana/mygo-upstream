@@ -97,6 +97,23 @@ wire protocol, TypeScript generation, and the checklist for adding features.
   otherwise, not the app's. Say which of the two a spike belongs to before
   optimizing it, and prefer a fixture that drives input in one call
   (`input motionevent DOWN/MOVE/UP`) over one that shells out per event.
+- **A measurement rig is part of the system under test until proven
+  otherwise.** Every rig tried on this app was slower than the app, so the
+  number read was the rig's: `adb shell input` costs about 50 ms a round trip
+  and became the frame interval every time. The way out is not a faster rig
+  but no rig — a frame source on the device. `Context.AnimationFrame` asks
+  for the next frame as soon as the display can show it, and a page that
+  calls it animates with nothing driving it from outside. The lab exposes it
+  as `/debug/set?drive=1` (lab.selfDrive).
+- **A frame interval that lands only on multiples of the vsync is a pacing
+  lock, not a slow frame.** With the device-side source on, the intervals
+  came out 144 frames at 1× 8.3 ms and 393 at 2× 16.7 ms, with nothing in
+  between — a distribution that says the frame loop is landing on the wrong
+  vsync, not that drawing is slow. The same run's `submit` read 13.8 ms
+  beside a 48-op scene, which no GPU spends that long on: the wait is the
+  loop missing its slot, and `submit` is where it gets charged. Told apart
+  from real GPU back-pressure by the shape — back-pressure scales with the
+  scene, a pacing lock does not, and its intervals quantize to the vsync.
 
 ## Commands
 

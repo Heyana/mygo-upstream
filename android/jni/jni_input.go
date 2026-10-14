@@ -50,13 +50,21 @@ import (
 
 // Java_org_mygo_MygoInput_nativeOnDisplayInfo is nativeOnDisplayInfo: the
 // display's density in dots per inch, from
-// resources.displayMetrics.densityDpi. One call per surface change turns
-// every later event's view pixels into DIPs.
+// resources.displayMetrics.densityDpi, and the rate its mode runs at, in
+// hertz. One call per surface change turns every later event's view pixels
+// into DIPs, and tells the engine's pacing which display it is on.
+//
+// refreshHz is 0 when the Activity could not learn it, which RefreshRate
+// treats as unknown rather than as zero hertz.
 //
 //export Java_org_mygo_MygoInput_nativeOnDisplayInfo
-func Java_org_mygo_MygoInput_nativeOnDisplayInfo(env *C.JNIEnv, self C.jobject, dpi C.jint) {
+func Java_org_mygo_MygoInput_nativeOnDisplayInfo(env *C.JNIEnv, self C.jobject, dpi C.jint, refreshHz C.jfloat) {
 	d := int(dpi)
-	theBackend.Post(func() { backend.DisplayInfo(d) })
+	hz := float64(refreshHz)
+	theBackend.Post(func() {
+		backend.DisplayInfo(d)
+		backend.SetDisplayRefreshRate(hz)
+	})
 }
 
 // Java_org_mygo_MygoInput_nativeOnTouchBatch is nativeOnTouchBatch: one

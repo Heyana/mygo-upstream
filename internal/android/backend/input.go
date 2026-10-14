@@ -731,6 +731,35 @@ var input Decoder
 // carries. It runs on the pump.
 func DisplayInfo(dpi int) { input.SetDPI(dpi) }
 
+// displayRefreshRate is the rate the Activity asked the display for, in Hz,
+// and 0 when nothing has said. It is read by Surface.RefreshRate.
+//
+// 🔴 Why it is set from Java instead of read from the window. The rate is a
+// property of the display mode the Activity selected, and the mode is
+// picked in Java (MygoView.requestMaxRefreshRate, through
+// WindowManager.LayoutParams.preferredDisplayModeId) — ANativeWindow, which
+// is all the native side holds, exposes no rate at all. Reading it anywhere
+// but where it was chosen would be reading a different number: on a panel
+// that drops to 60 Hz while still and rises to 120 Hz while touched, a rate
+// read at the wrong moment is the rate of the wrong moment.
+//
+// Guarded like the rest of the input globals: written on the pump, read
+// anywhere.
+var displayRefreshRate float64
+
+// SetDisplayRefreshRate records the rate the Activity's display mode runs
+// at, in Hz, so the engine's pacing sees the display it is actually on. It
+// runs on the pump.
+func SetDisplayRefreshRate(hz float64) {
+	if hz > 0 {
+		displayRefreshRate = hz
+	}
+}
+
+// DisplayRefreshRate is the rate SetDisplayRefreshRate last recorded, or 0
+// when nothing has.
+func DisplayRefreshRate() float64 { return displayRefreshRate }
+
 // TouchBatch maps one MotionEvent — already decoded into plain Go values by
 // the JNI layer — and delivers what it means. It runs on the pump.
 func TouchBatch(in TouchInput) { DispatchInput(input.Touch(in).Events) }
