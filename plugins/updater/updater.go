@@ -496,6 +496,9 @@ func (u *updater) run(s *session) {
 	skipped := u.state.SkippedVersion == r.version
 	automatic := u.state.AutomaticDownloads
 	u.mu.Unlock()
+	s.mu.Lock()
+	s.candidate = r
+	s.mu.Unlock()
 	if !s.User() {
 		if skipped {
 			return
@@ -524,7 +527,7 @@ func (u *updater) run(s *session) {
 
 // install downloads and installs r, showing its progress when the window
 // shows, then offers to relaunch.
-func (u *updater) install(s *session, r *release) {
+func (u *updater) install(s *session, r *release) error {
 	t := u.text()
 	s.set(t.downloadingView(0, 0))
 	err := r.install(s.ctx, func(downloaded, total int64) {
@@ -535,15 +538,15 @@ func (u *updater) install(s *session, r *release) {
 		}
 	})
 	if s.ctx.Err() != nil {
-		return // canceled
+		return s.ctx.Err()
 	}
 	if err != nil {
+		s.set(t.errorView(t.InstallError, err))
 		if s.User() || s.isShown() {
-			s.set(t.errorView(t.InstallError, err))
 			s.show()
 			s.wait()
 		}
-		return
+		return err
 	}
 	u.mu.Lock()
 	u.installed = r
@@ -551,6 +554,7 @@ func (u *updater) install(s *session, r *release) {
 	if s.User() || s.isShown() {
 		u.offerRelaunch(s, r)
 	}
+	return nil
 }
 
 func (u *updater) offerRelaunch(s *session, r *release) {

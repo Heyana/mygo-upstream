@@ -30,7 +30,9 @@ type session struct {
 	// showMu is held while the window is being created.
 	showMu sync.Mutex
 
-	mu sync.Mutex
+	mu        sync.Mutex
+	candidate *release
+	answered  bool
 	// user is set when the user asked for the check: the window shows
 	// from the start and reports that the app is up to date.
 	user    bool
@@ -80,6 +82,7 @@ func (s *session) set(v view) {
 	v.Prompt = s.view.Prompt
 	if !slices.Equal(v.Buttons, s.view.Buttons) {
 		v.Prompt++
+		s.answered = false
 	}
 	s.view = v
 	close(s.changed)
@@ -216,10 +219,11 @@ func (s *session) wait() response {
 // response to a prompt counts, and only with one of its buttons.
 func (s *session) Respond(prompt int, a action, automaticDownloads bool) {
 	s.mu.Lock()
-	ok := prompt == s.view.Prompt && slices.ContainsFunc(s.view.Buttons, func(b button) bool {
+	ok := !s.answered && prompt == s.view.Prompt && slices.ContainsFunc(s.view.Buttons, func(b button) bool {
 		return b.Action == a && !b.Disabled
 	})
 	if ok {
+		s.answered = true
 		s.view.Prompt++
 	}
 	s.mu.Unlock()

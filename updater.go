@@ -20,6 +20,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -53,6 +54,14 @@ type UpdaterModule struct{}
 
 // Updater installs new versions of the app.
 var Updater = &UpdaterModule{}
+
+var keepPreviousBundles atomic.Bool
+
+// SetKeepPreviousBundles retains replaced macOS bundles for applications whose
+// background helpers outlive the GUI and still need their resources. It is off
+// by default. The application owns cleanup after its helpers stop; other
+// platforms retain their existing update behavior.
+func (u *UpdaterModule) SetKeepPreviousBundles(keep bool) { keepPreviousBundles.Store(keep) }
 
 // ErrUpdatesDisabled is returned by Check for builds without updates:
 // development builds, and builds of apps without updates in mygo.config.ts.
@@ -295,8 +304,11 @@ func swapBundle(dir, target string) error {
 		_ = os.Rename(old, target)
 		return err
 	}
-	// The running app keeps its open files.
-	_ = os.RemoveAll(old)
+	// Helper processes may still need resources in this bundle after the GUI
+	// relaunches. Retain it; applications can clean up after their helpers exit.
+	if !keepPreviousBundles.Load() {
+		_ = os.RemoveAll(old)
+	}
 	return nil
 }
 

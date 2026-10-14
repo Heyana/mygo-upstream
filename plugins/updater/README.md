@@ -27,6 +27,19 @@ Apps whose windows all show native UI use `native.Plugin` (package
 `github.com/egoist/mygo/plugins/updater/native`) instead: the same window
 drawn in native UI, with no webview.
 
+An authenticated application controller can call
+`updater.InstallUpdate(ctx, selectedVersion)` off the UI thread after checking
+with `mygo.Updater.Check`. It shares the update window's session and signed
+installer, joins a download of the same release, and preserves automatic-download
+preferences. It reports installation completion without relaunching; the app
+can then report success and use `mygo.App.Relaunch`. Canceling a waiting remote
+caller does not cancel an install that the local window already started.
+
+Apps with background helpers that outlive the GUI can call
+`mygo.Updater.SetKeepPreviousBundles(true)` before enabling updates on macOS.
+Replaced bundles stay next to the application, and the app owns their cleanup
+after the helpers exit. The default continues to remove replaced bundles.
+
 It speaks the user's language (English, Chinese, Dutch, French, German,
 Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish, Turkish,
 Ukrainian), and `Options.Strings` changes its texts or adds languages.

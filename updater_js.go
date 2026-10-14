@@ -19,6 +19,9 @@ type UpdaterModule struct{}
 // Updater installs new versions of the app.
 var Updater = &UpdaterModule{}
 
+// SetKeepPreviousBundles has no effect in browsers, which cannot install bundles.
+func (u *UpdaterModule) SetKeepPreviousBundles(bool) {}
+
 // ErrUpdatesDisabled is returned by Check for builds without updates, as
 // those for browsers.
 var ErrUpdatesDisabled = errors.New("mygo: updates are not enabled for this build")
