@@ -28,6 +28,13 @@ android {
         versionCode 1
         versionName '1.0'
 
+        // ── 图片服务地址（lab 的 Images 页）─────────────────────────────
+        // 不在这里传。它编进 lab 自己的 .so：
+        //   MYGO_LAB_LIST=http://<主机>:8098 bash build.sh android
+        // （mygo-wind-router-lab/build.sh，-ldflags -X 注入 listBaseBuild）。
+        // 以前走 -PmygoLabList → BuildConfig → Os.setenv → os.Getenv，
+        // 是拿编译期常量绕两个运行时弯，还带 setenv/loadLibrary 的时序依赖。
+
         // ── minSdk 依据 ─────────────────────────────────────────────────
         // 1) Go 运行时（runtime + runtime/cgo + 调度器）在 Android 上的支持下限是 API 21
         //    （Go 官方 android 目标最低 API 21）；NDK r28 的最低支持 API 也是 21。
@@ -80,9 +87,10 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    // 不需要 BuildConfig / ViewBinding / Compose，保持最小
+    // 不需要 ViewBinding / Compose，保持最小。
+    // BuildConfig 不再需要（LAB_LIST 已改为编进 .so，见上面 app/build.gradle 的注）。
     buildFeatures {
-        buildConfig false
+        buildConfig true
     }
 }
 

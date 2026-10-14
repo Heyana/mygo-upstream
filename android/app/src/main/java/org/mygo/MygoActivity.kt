@@ -32,6 +32,18 @@ class MygoActivity : Activity() {
         // 让 View 拿到焦点，否则 onKeyDown/onKeyUp 不会派发到它。
         view.grabInputFocus()
 
+        // 🔴 图片服务地址不在这里传了。
+        //
+        // 以前是 gradle -PmygoLabList → BuildConfig.LAB_LIST → Os.setenv →
+        // Go 的 os.Getenv：把编译期常量绕两个运行时弯交给 Go，还带一个
+        // 「setenv 必须早于 loadLibrary」的时序雷（Go 在包 init 里读，晚一步
+        // 就静默为空）。
+        //
+        // 现在它由 lab 自己的构建脚本编进 .so：
+        //   MYGO_LAB_LIST=http://<主机>:8098 bash build.sh android
+        // 见 mygo-wind-router-lab/lab/listbase_android.go。地址随网络变、
+        // 不随运行变，而那个 .so 本来就是「为拿 adb 的这台机器」编的。
+
         // 平台能力（剪贴板/URL/通知/无障碍）的 Java 侧握手；必须在任何平台能力被使用前调用。
         MygoPlatform.install(this, view)
     }
