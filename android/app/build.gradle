@@ -119,3 +119,13 @@ if (nativeLibName != nativeJavaLibName) {
         "构建参数改 —— 改库名意味着换一个 Java 契约类。要用别的库名，请改\n" +
         "app/src/main/java/org/mygo/Native.java 的 System.loadLibrary 与包名。")
 }
+
+
+// 🔴 调试：保留 libmygo.so 的符号，tombstone 才能出帧（2026-10-15）。
+android {
+    packagingOptions {
+        jniLibs {
+            keepDebugSymbols += "**/libmygo.so"
+        }
+    }
+}
