@@ -864,3 +864,6 @@ func (r *Renderer) Release() {
 	}
 	r.forget()
 }
+
+// FrameInfo describes the last frame for MYGO_FRAME_STATS.
+func (r *Renderer) FrameInfo() string { return r.b.Summary() }

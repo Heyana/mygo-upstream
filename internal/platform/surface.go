@@ -130,6 +130,11 @@ type TextInputState struct {
 	// Client supplies full text and geometry for a custom text element. The
 	// Text/Start/End snapshot remains the plain-widget and TextCaret fallback.
 	Client TextInputClient
+	// NoInputMethod keeps input methods out while Active: keys type the
+	// characters of the keyboard's layout as TextInput, and nothing is
+	// composed, as winit's set_ime_allowed(false). Browsers cannot turn
+	// input methods off, and ignore it.
+	NoInputMethod bool
 }
 
 // NativeTextSelectionSurface uses system selection visuals and gestures for
@@ -234,7 +239,10 @@ const (
 	SurfaceFocus
 	SurfaceBlur
 	// SurfaceCommand performs the edit command Text: "copy", "cut",
-	// "paste", "selectAll", "undo", "redo" or "delete" (Edit menu roles).
+	// "paste", "pasteAndMatchStyle", "selectAll", "undo", "redo" or
+	// "delete" (Edit menu roles), or a Format menu role's: "bold",
+	// "italic", "underline", "strikethrough", "alignLeft", "alignCenter"
+	// or "alignRight".
 	SurfaceCommand
 	// FileDragOver reports files of another app dragged over X, Y, and
 	// FileDragLeave that they left. FileDrop drops Files at X, Y.

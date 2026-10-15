@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/raster"
 	"github.com/egoist/mygo/internal/scene"
@@ -22,10 +23,17 @@ type headless struct {
 	requested atomic.Bool
 	dark      bool
 	prefs     platform.Preferences
+	// lang and reg are what SetLocale and SetRegion set.
+	lang string
+	reg  i18n.Region
+	// rtl lays the window out right to left (SetDirection).
+	rtl       bool
 	clipboard string
-	cursor    Cursor
-	ime       platform.TextInputState
-	opened    []string
+	// clipboardData is what WriteClipboardData copied, with its formats.
+	clipboardData transfer.Data
+	cursor        Cursor
+	ime           platform.TextInputState
+	opened        []string
 	// escapes counts the Escapes nothing handled.
 	escapes int
 	openErr error
@@ -82,7 +90,7 @@ func (h *headless) requestFrame()                              { h.requested.Sto
 func (h *headless) setCursor(c Cursor)                         { h.cursor = c }
 func (h *headless) setTextInput(t platform.TextInputState)     { h.ime = t }
 func (h *headless) updateAccessibility(t *platform.AccessTree) { h.keepAccess(t) }
-func (h *headless) writeClipboard(s string)                    { h.clipboard = s }
+func (h *headless) writeClipboard(s string)                    { h.clipboard, h.clipboardData = s, transfer.Data{} }
 func (h *headless) startDrag()                                 {}
 func (h *headless) setDropFormats([]transfer.Format)           {}
 func (h *headless) readClipboard() string {
@@ -92,6 +100,36 @@ func (h *headless) readClipboard() string {
 	}
 	return h.clipboard
 }
+
+// readClipboardData reads the representations of formats of what was
+// copied, or the text of WriteClipboard.
+func (h *headless) readClipboardData(formats []transfer.Format) transfer.Data {
+	d := h.clipboardData
+	if len(d.Items()) == 0 && h.clipboard != "" {
+		d = transfer.TextData(h.clipboard)
+	}
+	if formats == nil {
+		return d
+	}
+	var reps []transfer.Representation
+	for _, f := range formats {
+		if b, err := d.Read(f); err == nil {
+			reps = append(reps, transfer.Bytes(f, b))
+		}
+	}
+	if len(reps) == 0 {
+		return transfer.Data{}
+	}
+	return transfer.New(transfer.NewItem(reps...))
+}
+
+func (h *headless) writeClipboardData(d transfer.Data) {
+	h.clipboardData = d.Snapshot()
+	b, _ := d.Read(transfer.Text)
+	h.clipboard = string(b)
+}
+
+func (h *headless) clipboardFormats() []transfer.Format { return h.readClipboardData(nil).Formats() }
 
 func (h *headless) startDataDrag(d transfer.Data, local any, o transfer.DragOptions, x, y float32) error {
 	h.dragData, h.dragLocal, h.dragOptions = d.Snapshot(), local, o
@@ -108,7 +146,10 @@ func (h *headless) finishDataDrag(r transfer.Result) {
 func (h *headless) titleBarDoubleClicked()            {}
 func (h *headless) escape()                           { h.escapes++ }
 func (h *headless) isDark() bool                      { return h.dark }
+func (h *headless) rightToLeft() bool                 { return h.rtl }
 func (h *headless) preferences() platform.Preferences { return h.prefs }
+func (h *headless) locale() string                    { return h.lang }
+func (h *headless) region() i18n.Region               { return h.reg }
 func (h *headless) titleBar() TitleBar                { return h.bar }
 func (h *headless) vibrancy() bool                    { return h.material }
 func (h *headless) invalidate()                       { h.requested.Store(true) }
@@ -237,6 +278,32 @@ func (t *Tester) SetPreferences(p Preferences) {
 		HighContrast: p.HighContrast, TextScale: float64(p.TextScale)}
 	t.rt.themeChanged()
 	t.settle()
+}
+
+// SetLocale makes tag the language the app shows, as mygo.App.SetLocale
+// does: the view reads it with Context.Locale, and text without a
+// language of its own is in it. A Tester starts with none, "", which
+// draws text as the system does by default.
+func (t *Tester) SetLocale(tag string) {
+	t.h.lang = tag
+	t.rt.changed()
+	t.settle()
+}
+
+// SetRegion changes the user's regional formats, which the view reads with
+// Context.Region, as the user does in the system's settings. A Tester
+// starts with the zero Region.
+func (t *Tester) SetRegion(r i18n.Region) {
+	t.h.reg = r
+	t.rt.changed()
+	t.settle()
+}
+
+// SetDirection lays the window out in d, as an app whose language reads
+// so: RightToLeft lays it out from the right.
+func (t *Tester) SetDirection(d Direction) {
+	t.h.rtl = d == RightToLeft
+	t.Frame()
 }
 
 // Frame renders another frame, as when the view's state changed.
@@ -493,22 +560,35 @@ func (t *Tester) SetFocused(focused bool) {
 
 // Compose shows text as an input method's composition, with its caret at
 // rune caret, as while typing in Chinese or Japanese; an empty text ends
-// it. Type commits the text.
+// it. Type commits the text. Nothing is composed while the focused element
+// turned input methods off (InputMethod), as on the desktop.
 func (t *Tester) Compose(text string, caret int) {
+	if t.h.ime.Active && t.h.ime.NoInputMethod {
+		return
+	}
 	t.send(platform.SurfaceEvent{Kind: platform.TextComposition, Text: text, Caret: caret})
 }
 
 // Command performs an edit command of the menus, as Copy of the Edit menu:
-// "copy", "cut", "paste", "selectAll", "undo", "redo" or "delete".
+// "copy", "cut", "paste", "pasteAndMatchStyle", "selectAll", "undo",
+// "redo" or "delete", or a Format menu's, as "bold" or "alignCenter".
 func (t *Tester) Command(name string) {
 	t.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: name})
 }
 
 // TextCaret returns where input methods compose, and whether one would:
-// the caret of the focused text input, or of an element's TextCaret.
+// the caret of the focused text input, or of an element's TextCaret, and
+// not while it turned them off (InputMethod).
 func (t *Tester) TextCaret() (Rect, bool) {
 	c := t.h.ime.Caret
-	return Rect{float32(c.X), float32(c.Y), float32(c.W), float32(c.H)}, t.h.ime.Active
+	return Rect{float32(c.X), float32(c.Y), float32(c.W), float32(c.H)}, t.h.ime.Active && !t.h.ime.NoInputMethod
+}
+
+// TextInputActive reports whether the focused element takes text, typed
+// or composed (HandleTextInput, TextCaret), and whether it turned input
+// methods off (InputMethod), as the window tells the system.
+func (t *Tester) TextInputActive() (active, noInputMethod bool) {
+	return t.h.ime.Active, t.h.ime.NoInputMethod
 }
 
 // Clipboard returns the text the view copied; SetClipboard sets the text
@@ -516,7 +596,18 @@ func (t *Tester) TextCaret() (Rect, bool) {
 func (t *Tester) Clipboard() string { return t.h.clipboard }
 
 // SetClipboard sets the clipboard's text.
-func (t *Tester) SetClipboard(s string) { t.h.clipboard = s }
+func (t *Tester) SetClipboard(s string) { t.h.clipboard, t.h.clipboardData = s, transfer.Data{} }
+
+// ClipboardData returns what the view copied with Services.WriteClipboardData,
+// or the text it copied; SetClipboardData puts data on the clipboard, as
+// another app copies HTML.
+func (t *Tester) ClipboardData() transfer.Data { return t.h.readClipboardData(nil) }
+
+func (t *Tester) SetClipboardData(d transfer.Data) {
+	t.h.clipboardData = d.Snapshot()
+	b, _ := d.Read(transfer.Text)
+	t.h.clipboard = string(b)
+}
 
 // Cursor returns the pointer shape the view shows.
 func (t *Tester) Cursor() Cursor { return t.h.cursor }

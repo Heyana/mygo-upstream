@@ -13,7 +13,7 @@ func TestPrimaryScreenDragSelectsListMarkerWithMouseTracking(t *testing.T) {
 	for _, mode := range []int{1000, 1002, 1003} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			conn := newPipe()
-			term, err := New(Options{CopyOnSelect: true, Conn: conn, SelectOnDrag: true})
+			term, err := New(Options{CopyOnSelect: CopyOnSelectClipboard, Conn: conn, SelectOnDrag: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -50,7 +50,7 @@ func TestApplicationSelectionOnlyOwnsTrackedAlternateScreenDrags(t *testing.T) {
 		for _, tracking := range []bool{false, true} {
 			t.Run(fmt.Sprintf("alternate%v-tracking%v", alt, tracking), func(t *testing.T) {
 				conn := newPipe()
-				term, err := New(Options{CopyOnSelect: true, Conn: conn, SelectOnDrag: true})
+				term, err := New(Options{CopyOnSelect: CopyOnSelectClipboard, Conn: conn, SelectOnDrag: true})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -112,7 +112,7 @@ func TestApplicationSelectionOnlyOwnsTrackedAlternateScreenDrags(t *testing.T) {
 func TestPrimaryScreenSelectionKeepsClicksWheelAndOverrides(t *testing.T) {
 	loadLib(t)
 	conn := newPipe()
-	term, err := New(Options{CopyOnSelect: true, Conn: conn, SelectOnDrag: true})
+	term, err := New(Options{CopyOnSelect: CopyOnSelectClipboard, Conn: conn, SelectOnDrag: true})
 	if err != nil {
 		t.Fatal(err)
 	}

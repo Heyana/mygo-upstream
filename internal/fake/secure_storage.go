@@ -8,24 +8,24 @@ func (b *Backend) SecureStorage() platform.SecureStorage { return secureStorage{
 
 func (s secureStorage) Set(namespace, key string, value []byte, _ string, done func(error)) {
 	s.b.mu.Lock()
-	err := s.b.SecretError
+	err := s.b.SecureStoreError
 	if err == nil {
-		if s.b.secrets == nil {
-			s.b.secrets = map[string][]byte{}
+		if s.b.secureItems == nil {
+			s.b.secureItems = map[string][]byte{}
 		}
 		data := make([]byte, len(value))
 		copy(data, value)
-		s.b.secrets[namespace+"\x00"+key] = data
+		s.b.secureItems[namespace+"\x00"+key] = data
 	}
 	s.b.mu.Unlock()
 	done(err)
 }
 func (s secureStorage) Get(namespace, key string, done func([]byte, error)) {
 	s.b.mu.Lock()
-	value, exists := s.b.secrets[namespace+"\x00"+key]
+	value, exists := s.b.secureItems[namespace+"\x00"+key]
 	data := make([]byte, len(value))
 	copy(data, value)
-	err := s.b.SecretError
+	err := s.b.SecureStoreError
 	if !exists && err == nil {
 		err = platform.ErrSecretNotFound
 	}
@@ -37,9 +37,9 @@ func (s secureStorage) Get(namespace, key string, done func([]byte, error)) {
 }
 func (s secureStorage) Delete(namespace, key string, done func(error)) {
 	s.b.mu.Lock()
-	err := s.b.SecretError
+	err := s.b.SecureStoreError
 	if err == nil {
-		delete(s.b.secrets, namespace+"\x00"+key)
+		delete(s.b.secureItems, namespace+"\x00"+key)
 	}
 	s.b.mu.Unlock()
 	done(err)

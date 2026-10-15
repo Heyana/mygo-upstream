@@ -311,6 +311,14 @@ func writeInstaller(c *Config, stage, work, exe, goarch string, installed []stri
 	uninstallKey := `Software\Microsoft\Windows\CurrentVersion\Uninstall\` + c.Identifier
 	shortcut := nsisEscape(fsName(c.Name)) + ".lnk"
 	register, unregister := nsisAssociations(c, exe)
+	langs, err := c.languages()
+	if err != nil {
+		return "", err
+	}
+	languages, err := nsisLanguageMacros(langs)
+	if err != nil {
+		return "", err
+	}
 	script := `Unicode true
 ManifestDPIAware true
 SetCompressor /SOLID lzma
@@ -329,8 +337,7 @@ BrandingText " "
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
-!insertmacro MUI_LANGUAGE "English"
-
+` + languages + `
 Section
   SetOutPath "$INSTDIR"
 ` + files.String() + `  WriteUninstaller "$INSTDIR\Uninstall.exe"

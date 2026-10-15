@@ -80,6 +80,17 @@ func TestForeground(hwnd uintptr) bool {
 // TestEndMenu leaves the menus, as Escape does.
 func TestEndMenu() { procEndMenu.Call() }
 
+// TestPanelStyles reports whether a window is a topmost tool window
+// without a window menu, owned by the hidden application window, as
+// panels are.
+func TestPanelStyles(hwnd uintptr) (tool, topmost, owned bool) {
+	const gwOwner = 4
+	ex := windowLong(hwnd, gwlExStyle)
+	owner, _, _ := procGetNextWindow.Call(hwnd, gwOwner)
+	menu := windowLong(hwnd, gwlStyle)&wsSysMenu != 0
+	return ex&wsExToolWindow != 0 && !menu, ex&wsExTopmost != 0, owner != 0 && owner == theBackend.appHwnd
+}
+
 // TestActivateAccelerator runs the menu item of a window's shortcut, as its
 // keys do in the page, and reports whether there is one.
 func TestActivateAccelerator(hwnd uintptr, acc string) bool {
@@ -451,3 +462,73 @@ func popupLabels(h uintptr) []string {
 	}
 	return labels
 }
+
+var (
+	procPrintWindow            = user32.NewProc("PrintWindow")
+	procGetPixel               = gdi32.NewProc("GetPixel")
+	procCreateCompatibleBitmap = gdi32.NewProc("CreateCompatibleBitmap")
+)
+
+// TestMenuBarColors draws a window as it shows and returns the colors, as
+// COLORREFs, of its menu bar past the last item and of the line below it.
+func TestMenuBarColors(hwnd uintptr) (bar, line uint32, ok bool) {
+	w := theBackend.windows[hwnd]
+	if w == nil {
+		return 0, 0, false
+	}
+	r, ok := w.menuBarRect()
+	if !ok {
+		return 0, 0, false
+	}
+	var wr rect
+	procGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&wr)))
+	screen, _, _ := procGetDC.Call(0)
+	defer procReleaseDC.Call(0, screen)
+	dc, _, _ := procCreateCompatibleDC.Call(screen)
+	defer procDeleteDC.Call(dc)
+	bmp, _, _ := procCreateCompatibleBitmap.Call(screen, uintptr(wr.Right-wr.Left), uintptr(wr.Bottom-wr.Top))
+	defer procDeleteObject.Call(bmp)
+	old, _, _ := procSelectObject.Call(dc, bmp)
+	defer procSelectObject.Call(dc, old)
+	const pwRenderFullContent = 2
+	procPrintWindow.Call(hwnd, dc, pwRenderFullContent)
+	x := uintptr(r.Right - 4)
+	b, _, _ := procGetPixel.Call(dc, x, uintptr((r.Top+r.Bottom)/2))
+	l, _, _ := procGetPixel.Call(dc, x, uintptr(r.Bottom))
+	return uint32(b), uint32(l), true
+}
+
+// TestRecentDocuments returns the paths in the Recent category of the app's
+// jump list, newest first.
+func TestRecentDocuments() []string {
+	var (
+		clsid = guid("86bec222-30f2-47e0-9f25-60d11cd75c28") // ApplicationDocumentLists
+		iid   = guid("3c594f9f-9f30-47a1-979a-c9e83d3d0a06") // IApplicationDocumentLists
+	)
+	const adlGetList, adltRecent = 4, 0
+	lists, err := coCreate(clsid, iid)
+	if err != nil {
+		return nil
+	}
+	defer release(lists)
+	var arr uintptr
+	if failed(comCall(lists, adlGetList, adltRecent, 0, uintptr(unsafe.Pointer(&iidIObjectArray)), uintptr(unsafe.Pointer(&arr)))) {
+		return nil
+	}
+	defer release(arr)
+	var n uint32
+	comCall(arr, oaGetCount, uintptr(unsafe.Pointer(&n)))
+	var paths []string
+	for i := range n {
+		var item uintptr
+		if failed(comCall(arr, oaGetAt, uintptr(i), uintptr(unsafe.Pointer(&iidIShellItem)), uintptr(unsafe.Pointer(&item)))) {
+			continue
+		}
+		paths = append(paths, itemPath(item))
+		release(item)
+	}
+	return paths
+}
+
+// TestWindowTitle returns the text of a window's title bar.
+func TestWindowTitle(hwnd uintptr) string { return (&window{hwnd: hwnd}).Title() }

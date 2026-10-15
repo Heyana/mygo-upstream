@@ -431,6 +431,12 @@ void main() {
 	float kind = vParams.x;
 	vec4 res;
 	float glyphCov = vTransform0.w > 0.5 ? localCoverage(p, vRect, vec4(0.0), 1.0, fr) : 1.0;
+	float clip = clipCoverage();
+	// The dispatch below is a chain of ifs with early returns, not one else-if chain:
+	// an else-if chain here fails to link in ANGLE's D3D11 backend on Windows (an
+	// empty info log, and every WebGL context in the page is lost; Firefox's headless
+	// build exits at the link). See https://issues.chromium.org/issues/573007971 and
+	// https://bugzilla.mozilla.org/show_bug.cgi?id=2081240. The shape is load-bearing.
 	if (kind < 0.5) {
 		float outer = localCoverage(p, vRect, vRadii, vTransform0.w, fr);
 		res = paint(p, vParams.z, vRect, vColor, vColor2, vGrad) * outer;
@@ -445,7 +451,13 @@ void main() {
 			vec4 b = premul(vBorder) * bc;
 			res = b + res * (1.0 - b.a);
 		}
-	} else if (kind < 1.5 && vParams.y > 0.5) {
+		fragColor = res * clip * vParams.w;
+#ifdef DUAL
+		fragAlpha = fragColor.aaaa;
+#endif
+		return;
+	}
+	if (kind < 1.5 && vParams.y > 0.5) {
 		// An inner shadow: inside the box, what the hole, blurred, leaves.
 		float sigma = vParams.z;
 		float hole = 0.0;
@@ -454,7 +466,13 @@ void main() {
 			hole = sigma > 0.0 ? boxShadow(p, vWidths, sigma, corner) : localCoverage(p, vWidths, vInner, vTransform0.w, fr);
 		}
 		res = premul(vColor) * (localCoverage(p, vRect, vRadii, vTransform0.w, fr) * (1.0 - hole));
-	} else if (kind < 1.5) {
+		fragColor = res * clip * vParams.w;
+#ifdef DUAL
+		fragAlpha = fragColor.aaaa;
+#endif
+		return;
+	}
+	if (kind < 1.5) {
 		float sigma = vParams.z;
 		float corner = max(max(vRadii.x, vRadii.y), max(vRadii.z, vRadii.w));
 		float s =
@@ -463,28 +481,52 @@ void main() {
 			s *= 1.0 - localCoverage(p, vWidths, vInner, vTransform0.w, fr); // outside the box casting it
 		}
 		res = premul(vColor) * s;
-	} else if (kind < 2.5) {
+		fragColor = res * clip * vParams.w;
+#ifdef DUAL
+		fragAlpha = fragColor.aaaa;
+#endif
+		return;
+	}
+	if (kind < 2.5) {
 		vec4 c = paint(p, vParams.z, vRect, vColor, vColor2, vGrad);
 		res = c *
 			  textCoverage(sampleLocal(uMask, tex, vWidths, vTransform0.w).r, unpremul(c), vInner.x, vInner.y,
 						   vRadii) *
 			  glyphCov;
-	} else if (kind < 3.5) {
+		fragColor = res * clip * vParams.w;
+#ifdef DUAL
+		fragAlpha = fragColor.aaaa;
+#endif
+		return;
+	}
+	if (kind < 3.5) {
 		res = sampleLocal(uColor, tex, vWidths, vTransform0.w) * vColor.a * glyphCov;
-	} else if (kind < 4.5) {
+		fragColor = res * clip * vParams.w;
+#ifdef DUAL
+		fragAlpha = fragColor.aaaa;
+#endif
+		return;
+	}
+	if (kind < 4.5) {
 		res = sampleImage(uImage, tex, vWidths, vParams.z, dtex);
 		if (vParams.y > 0.5) {
 			res.rgb = vec3(dot(res.rgb, vec3(0.2126, 0.7152, 0.0722)));
 		}
 		res = tint(res, vColor) * localCoverage(p, vRect, vRadii, vTransform0.w, fr);
-	} else {
+		fragColor = res * clip * vParams.w;
+#ifdef DUAL
+		fragAlpha = fragColor.aaaa;
+#endif
+		return;
+	}
+	{
 		vec4 c = paint(p, vParams.z, vRect, vColor, vColor2, vGrad);
 		vec3 straight = unpremul(c);
 		if (vTransform0.w > 0.5) {
 			vec3 rgb = sampleLocal(uColor, tex, vWidths, 1.0).rgb;
 			res = c * textCoverage((rgb.r + rgb.g + rgb.b) / 3.0, straight, vInner.x, vInner.y, vRadii) *
 				  glyphCov;
-			fragColor = res * clipCoverage() * vParams.w;
+			fragColor = res * clip * vParams.w;
 #ifdef DUAL
 			fragAlpha = fragColor.aaaa;
 #endif
@@ -492,7 +534,7 @@ void main() {
 		}
 		vec3 a = subpixelCoverage(sampleLocal(uColor, tex, vWidths, vTransform0.w).rgb, straight, vInner.x,
 								  vInner.y, vRadii);
-		vec3 w = a * c.a * clipCoverage() * vParams.w;
+		vec3 w = a * c.a * clip * vParams.w;
 		float wa = (w.r + w.g + w.b) / 3.0;
 #ifdef DUAL
 		fragColor = vec4(straight * w, wa);
@@ -502,11 +544,6 @@ void main() {
 #endif
 		return;
 	}
-	float clip = clipCoverage();
-	fragColor = res * clip * vParams.w;
-#ifdef DUAL
-	fragAlpha = fragColor.aaaa;
-#endif
 }
 
 #endif

@@ -23,6 +23,7 @@ var (
 	cbMonitorsChanged ptr
 	cbNotification    ptr
 	cbPowerSignal     ptr
+	cbNetworkChanged  ptr
 )
 
 func initSystemCallbacks() {
@@ -49,6 +50,10 @@ func initSystemCallbacks() {
 		if id, ok := notifications[dbusID]; ok {
 			theBackend.h.NotificationClicked(id)
 		}
+	})
+	// The network-changed signal of GNetworkMonitor (network.go).
+	cbNetworkChanged = purego.NewCallback(func(monitor, available, data ptr) {
+		theBackend.h.NetworkChanged(theBackend.Network().Status())
 	})
 
 	settings := gtkSettingsGetDefault()
@@ -511,6 +516,13 @@ func (b *Backend) NotificationsSupported() bool {
 	_, err := bus()
 	return err == nil
 }
+
+// WebViewAvailable reports whether a window showing a web page can have
+// one: WebKitGTK, JavaScriptCore and libsoup, which it needs. Windows
+// showing native UI need GTK alone, so an app whose windows all do runs
+// without them. Loading the libraries is as much as can be known before a
+// page loads.
+func (b *Backend) WebViewAvailable() bool { return webKit() == nil }
 
 func (b *Backend) ShowNotification(n *platform.Notification, done func(error)) {
 	if n.DelaySeconds > 0 {

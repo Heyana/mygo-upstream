@@ -205,7 +205,7 @@ func (DialogModule) Message(opts MessageOptions) (MessageResult, error) {
 	}
 	buttons := opts.Buttons
 	if len(buttons) == 0 {
-		buttons = []string{"OK"}
+		buttons = []string{menuMessages().Ok()}
 	}
 	if opts.Style != MessageAlert && opts.Style != MessageActionSheet {
 		return MessageResult{}, fmt.Errorf("mygo: invalid message style %q", opts.Style)
@@ -218,7 +218,7 @@ func (DialogModule) Message(opts MessageOptions) (MessageResult, error) {
 	cancel := opts.CancelButton
 	if cancel == 0 {
 		for i, b := range buttons {
-			if l := strings.ToLower(b); l == "cancel" || l == "no" {
+			if l := strings.ToLower(b); l == "cancel" || l == "no" || b == menuMessages().Cancel() {
 				cancel = i
 				break
 			}

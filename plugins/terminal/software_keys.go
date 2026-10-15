@@ -68,7 +68,7 @@ func (v *view) modifiedText(text string, mods ui.Modifiers) {
 	if mods == ui.Super {
 		switch strings.ToLower(text) {
 		case "c":
-			v.copy()
+			v.copy(false)
 			return
 		case "v":
 			v.paste()

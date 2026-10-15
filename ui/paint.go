@@ -590,7 +590,7 @@ func (p *Painter) textForeground(l *text.Layout, x, y float32, color Color, ts t
 		baseline := sys.Baseline((y + line.Baseline) * s)
 		for _, g := range line.Glyphs {
 			pen := (x + g.X) * s
-			if !p.transform.Set && !p.inlineTransforms() && (pen > (p.clip.X+p.clip.W)*s || pen+(g.Advance+g.Size)*s < p.clip.X*s) {
+			if g.Object || !p.transform.Set && !p.inlineTransforms() && (pen > (p.clip.X+p.clip.W)*s || pen+(g.Advance+g.Size)*s < p.clip.X*s) {
 				continue
 			}
 			ix := float32(math.Floor(float64(pen)))
@@ -838,7 +838,7 @@ func (p *Painter) scrollbars(e *node) {
 		x = rescale(x, e.contentW-float64(e.w), w-float64(e.w))
 		y = rescale(y, e.contentH-float64(e.h), h-float64(e.h))
 	}
-	g := scrollBars(Rect{e.x, e.y, e.w, e.h}, e.barInset, float32(w), float32(h), float32(x), float32(y), e.flags, theme.scrollbarWidth())
+	g := scrollBars(Rect{e.x, e.y, e.w, e.h}, e.barInset, float32(w), float32(h), float32(x), float32(y), e.flags, theme.scrollbarWidth(), e.rtl())
 	if g.vertical {
 		bar := g.v
 		if dragging && !rt.scrollDrag.horizontal {
@@ -875,8 +875,11 @@ type scrollGeometry struct {
 // (x, y) over content w×h, with thumbs width DIPs wide, moved in from its
 // edges by inset (top, right, bottom, left, ScrollbarInsets): those of the
 // directions its flags scroll that overflow, which leave each other the
-// corner where both show.
-func scrollBars(box Rect, inset [4]float32, w, h, x, y float32, flags uint64, width float32) scrollGeometry {
+// corner where both show. Right to left (rtl), the vertical bar is on the
+// left, as in Flutter, browsers and GTK, the corner at the bottom left,
+// and x, which counts from the right, puts the horizontal thumb at the
+// right at 0.
+func scrollBars(box Rect, inset [4]float32, w, h, x, y float32, flags uint64, width float32, rtl bool) scrollGeometry {
 	var g scrollGeometry
 	if flags&flagHideScrollbars != 0 {
 		return g
@@ -893,12 +896,22 @@ func scrollBars(box Rect, inset [4]float32, w, h, x, y float32, flags uint64, wi
 		g.vTrack = Rect{box.X + box.W - right - width - 6, box.Y + top, width + 6, track}
 		t := scrollThumb(box.Y+top, track, box.H, h, y)
 		g.v = Rect{box.X + box.W - right - width - 3, t.Y, width, t.H}
+		if rtl {
+			g.vTrack.X = box.X + left
+			g.v.X = box.X + left + 3
+		}
 	}
 	if g.horizontal {
 		track := max(box.W-left-right-corner, 0)
 		g.hTrack = Rect{box.X + left, box.Y + box.H - bottom - width - 6, track, width + 6}
 		t := scrollThumb(box.X+left, track, box.W, w, x)
 		g.h = Rect{t.Y, box.Y + box.H - bottom - width - 3, t.H, width}
+		if rtl {
+			g.hTrack.X += corner
+			// As far from the right of the track as the thumb would be
+			// from its left.
+			g.h.X = g.hTrack.X + g.hTrack.W - (t.Y - (box.X + left)) - t.H
+		}
 	}
 	return g
 }

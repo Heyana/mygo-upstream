@@ -223,7 +223,9 @@ The apps run where they are, but to ship them to users, sign them: see
     bar, its material picked in it), `examples/effort-slider` (a web
     demo's animated slider redrawn: letters blurring in, a burst of
     pixels, a shaking card), `examples/confetti` (canvas-confetti's
-    demos, every piece flying on poses that only paint) and
+    demos, every piece flying on poses that only paint), `examples/timeline`
+    (an intro on one playhead: a card sliding in, its title and rows
+    following it, with play, pause, reverse and restart) and
     `examples/gallery` (a tour of the
     toolkit: layout, widgets, text editing, a list of ten thousand rows,
     drawing and overlays).

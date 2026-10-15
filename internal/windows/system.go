@@ -387,9 +387,13 @@ const (
 	hcfHighContrastOn         = 0x1
 	accessibilityKey          = `Software\Microsoft\Accessibility`
 	dwmKey                    = `Software\Microsoft\Windows\DWM`
+	personalizeKey            = `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
 	textScaleFactor           = "TextScaleFactor"
 	settingImmersiveColorSet  = "ImmersiveColorSet"
 	settingWindowMetrics      = "WindowMetrics"
+	// settingIntl is the lParam of WM_SETTINGCHANGE when the display
+	// languages or the regional formats changed.
+	settingIntl = "intl"
 )
 
 // highContrast is HIGHCONTRASTW.
@@ -398,9 +402,16 @@ type highContrast struct {
 	defaultScheme uintptr
 }
 
+// highContrastOn reports whether a contrast theme is on.
+func highContrastOn() bool {
+	hc := highContrast{size: uint32(unsafe.Sizeof(highContrast{}))}
+	r, _, _ := procSystemParametersInfoW.Call(spiGetHighContrast, uintptr(hc.size), uintptr(unsafe.Pointer(&hc)), 0)
+	return r != 0 && hc.flags&hcfHighContrastOn != 0
+}
+
 // Preferences reads the accent of the title bars and the Start menu, the
-// settings of animation effects and contrast themes, and the size of
-// text of Accessibility.
+// settings of animation and transparency effects and contrast themes, and
+// the size of text of Accessibility.
 func (t theme) Preferences() platform.Preferences {
 	var p platform.Preferences
 	if v, ok := regDWORD(hkeyCurrentUser, dwmKey, "AccentColor"); ok { // 0xAABBGGRR
@@ -410,10 +421,13 @@ func (t theme) Preferences() platform.Preferences {
 	if r, _, _ := procSystemParametersInfoW.Call(spiGetClientAreaAnimation, 0, uintptr(unsafe.Pointer(&animate)), 0); r != 0 {
 		p.ReduceMotion = animate == 0
 	}
-	hc := highContrast{size: uint32(unsafe.Sizeof(highContrast{}))}
-	if r, _, _ := procSystemParametersInfoW.Call(spiGetHighContrast, uintptr(hc.size), uintptr(unsafe.Pointer(&hc)), 0); r != 0 {
-		p.HighContrast = hc.flags&hcfHighContrastOn != 0
+	// Transparency effects of Personalization > Colors, which Windows's
+	// own surfaces (Mica, Acrylic) follow; toggling them broadcasts
+	// ImmersiveColorSet.
+	if v, ok := regDWORD(hkeyCurrentUser, personalizeKey, "EnableTransparency"); ok {
+		p.ReduceTransparency = v == 0
 	}
+	p.HighContrast = highContrastOn()
 	if v, ok := regDWORD(hkeyCurrentUser, accessibilityKey, textScaleFactor); ok && v >= 100 && v <= 500 {
 		p.TextScale = float64(v) / 100
 	}
@@ -445,11 +459,12 @@ func (b *Backend) isDark() bool {
 	case "light":
 		return false
 	}
-	light, ok := regDWORD(hkeyCurrentUser, `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`, "AppsUseLightTheme")
+	light, ok := regDWORD(hkeyCurrentUser, personalizeKey, "AppsUseLightTheme")
 	return ok && light == 0
 }
 
 func (b *Backend) applyTheme() {
+	b.applyMenuTheme()
 	for _, w := range b.windows {
 		b.applyWindowTheme(w)
 		w.withWebView(func() { b.applyWebViewTheme(w) })
@@ -457,7 +472,7 @@ func (b *Backend) applyTheme() {
 }
 
 // applyWindowTheme matches the title bar, or the controls drawn in its
-// place, to the appearance.
+// place, and the menus to the appearance.
 func (b *Backend) applyWindowTheme(w *window) {
 	dark := int32(0)
 	if b.isDark() {
@@ -466,6 +481,10 @@ func (b *Backend) applyWindowTheme(w *window) {
 	procDwmSetWindowAttribute.Call(w.hwnd, dwmwaUseImmersiveDarkMode, uintptr(unsafe.Pointer(&dark)), 4)
 	if w.caption != nil {
 		w.caption.paint()
+	}
+	// The bar is drawn again in the appearance, with the line below it.
+	if w.menuShown() {
+		procRedrawWindow.Call(w.hwnd, 0, 0, rdwInvalidate|rdwFrame|rdwUpdateNow)
 	}
 }
 

@@ -125,7 +125,7 @@ func place(e *node, x, y float32) {
 	e.y += y
 	cx, cy := e.x, e.y
 	if f := e.followX; f != nil {
-		cx -= float32(f.st.scrollX)
+		cx -= float32(f.followShift())
 	}
 	if e.scrolls() {
 		// The content may no longer reach as far as the offset, as when a
@@ -146,7 +146,7 @@ func place(e *node, x, y float32) {
 			// app from its ScrollState: build the next frame with the new.
 			e.c.rt.animating = true
 		}
-		cx -= float32(s.scrollX)
+		cx -= float32(e.scrollLeft())
 		cy -= float32(s.scrollY - e.scrollBase)
 	}
 	for ch := e.first; ch != nil; ch = ch.next {
@@ -160,12 +160,16 @@ func place(e *node, x, y float32) {
 }
 
 // relative returns how far the insets of an element in flow move it from
-// where the layout put it, against a content box cw×ch.
+// where the layout put it, against a content box cw×ch. Where both Left
+// and Right are set, Left wins, or Right in an element laid out right to
+// left, as in CSS.
 func (e *node) relative(cw, ch float32) (dx, dy float32) {
-	if v, ok := e.inset[3].resolve(base(cw)); ok {
-		dx = v
-	} else if v, ok := e.inset[1].resolve(base(cw)); ok {
-		dx = -v
+	left, lok := e.inset[3].resolve(base(cw))
+	right, rok := e.inset[1].resolve(base(cw))
+	if lok && !(rok && e.rtl()) {
+		dx = left
+	} else if rok {
+		dx = -right
 	}
 	if v, ok := e.inset[0].resolve(base(ch)); ok {
 		dy = v
@@ -181,16 +185,25 @@ func (e *node) textParams(width float32) text.Params {
 	ts := e.resolvedText()
 	style := text.Style{
 		Family: ts.family, Size: ts.size, Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight,
-		LetterSpacing: ts.spacing, Features: ts.features,
+		LetterSpacing: ts.spacing, Features: ts.features, Lang: ts.lang,
 	}
 	if ts.fixedLine && ts.lineHeight > 0 {
 		style.LineHeight = ts.lineHeight / style.FontSize()
 	}
-	p := text.Params{Text: e.text, Width: width, MaxLines: e.maxLines, Style: style, Spans: e.textSpans(), NoWrap: e.noWrap, Ellipsis: e.ellipsis}
-	switch ts.align {
-	case Center:
+	p := text.Params{Text: e.text, Width: width, MaxLines: e.maxLines, Style: style, Spans: e.textSpans(), NoWrap: e.noWrap, Ellipsis: e.ellipsis, RTL: e.rtl()}
+	switch {
+	case ts.align == Center:
 		p.Align = text.Center
-	case End:
+	case e.rtl():
+		// Lines start at the right of an element laid out right to left,
+		// whatever they read, as in CSS, AppKit's cells and GTK's labels.
+		// Left to right, a paragraph reading right to left starts at the
+		// right, as Apple's guidelines align a paragraph by its language.
+		p.Align = text.Right
+		if ts.align == End {
+			p.Align = text.Left
+		}
+	case ts.align == End:
 		p.Align = text.End
 	}
 	return p
@@ -234,6 +247,9 @@ func (e *node) resolvedText() textStyle {
 		}
 		if take&setFeatures != 0 {
 			out.features = t.features
+		}
+		if take&setLang != 0 {
+			out.lang = t.lang
 		}
 		if take&setStrike != 0 {
 			out.strike = t.strike
@@ -463,6 +479,15 @@ func layoutBox(e *node, w, h float32) {
 		lh = inf
 	}
 	uw, uh := boxLayout(e, lw, lh, true)
+	if e.flags&flagScrollX != 0 && uw < cw && e.rtl() {
+		// Laid out from the right of what the content takes, which goes
+		// at the right of the container.
+		for c := e.first; c != nil; c = c.next {
+			if c.flags&flagAbsolute == 0 {
+				c.x += cw - uw
+			}
+		}
+	}
 	if e.baselines {
 		alignBaselines(e)
 	}
@@ -712,7 +737,10 @@ func flexLayout(e *node, cw, ch float32, commit bool) (usedW, usedH float32) {
 
 	// Place the items, along the main axis from its start (the right of a
 	// reversed row, the bottom of a reversed column), and the lines across
-	// it from theirs (the bottom of a row wrapping in reverse).
+	// it from theirs (the bottom of a row wrapping in reverse). Right to
+	// left, a row starts at the right, as does a column across it.
+	flipMain := e.reverse != (row && e.rtl())
+	flipCross := e.wrapReverse != (!row && e.rtl())
 	contentMain := mainSize
 	if !finite(contentMain) {
 		contentMain = usedMain
@@ -724,10 +752,10 @@ func flexLayout(e *node, cw, ch float32, commit bool) (usedW, usedH float32) {
 	r := b2i(row)
 	ms, me := mainMargins[r][0], mainMargins[r][1]
 	cs, ce := crossMargins[r][0], crossMargins[r][1]
-	if e.reverse {
+	if flipMain {
 		ms, me = me, ms
 	}
-	if e.wrapReverse {
+	if flipCross {
 		cs, ce = ce, cs
 	}
 	crossPos := crossStart
@@ -755,7 +783,7 @@ func flexLayout(e *node, cw, ch float32, commit bool) (usedW, usedH float32) {
 				endM = auto
 			}
 			mainOff := pos + startM
-			if e.reverse {
+			if flipMain {
 				mainOff = contentMain - mainOff - it.main
 			}
 			var crossOff float32
@@ -775,7 +803,7 @@ func flexLayout(e *node, cw, ch float32, commit bool) (usedW, usedH float32) {
 				}
 			}
 			crossOff += crossPos + c.m(cs)
-			if e.wrapReverse {
+			if flipCross {
 				crossOff = contentCross - crossOff - it.cross
 			}
 			if row {
@@ -908,7 +936,9 @@ func justifyOffsets(j Align, free float32, n int) (start, between float32) {
 	return 0, 0
 }
 
-// layoutAbsolute places the absolute children in the padding box.
+// layoutAbsolute places the absolute children in the padding box. Right
+// to left, as in CSS, one with neither Left nor Right goes to the right,
+// and Right wins over Left where its width leaves no room for both.
 func layoutAbsolute(e *node) {
 	pw, ph := e.w-e.border[1]-e.border[3], e.h-e.border[0]-e.border[2]
 	for c := e.first; c != nil; c = c.next {
@@ -945,7 +975,8 @@ func layoutAbsolute(e *node) {
 			h = heightAt(c, w, ph)
 		}
 		x := left + c.m(3)
-		if !lok && rok {
+		rtl := c.rtl()
+		if !lok && (rok || rtl) {
 			x = pw - right - w - c.m(1)
 		} else if lok && rok {
 			// Automatic margins share the room left between the insets.
@@ -955,6 +986,8 @@ func layoutAbsolute(e *node) {
 				x += max(free, 0) / 2
 			case autoL:
 				x += max(free, 0)
+			case !autoR && rtl:
+				x += free
 			}
 		}
 		y := top + c.m(0)
@@ -991,6 +1024,7 @@ func attachTo(c, e *node, pw, ph float32) {
 	}
 	t := laidOutVisualBox(c.popover)
 	at, self := c.attach.anchors()
+	at, self = at.physical(c.rtl()), self.physical(c.rtl())
 	ax, ay := at.fractions()
 	sx, sy := self.fractions()
 	x := alongTarget(t.X, t.W, ax, sx, w, c.m(3)-c.m(1), c.c.w)
@@ -1035,10 +1069,10 @@ func laidOutOrigin(e *node) (x, y float32) {
 	for ch, p := e, e.parent; p != nil; ch, p = p, p.parent {
 		if ch.flags&flagAbsolute == 0 || ch.leaving == 1 {
 			if f := p.followX; f != nil {
-				x -= float32(f.st.scrollX)
+				x -= float32(f.followShift())
 			}
 			if p.scrolls() {
-				x -= float32(p.st.scrollX)
+				x -= float32(p.scrollLeft())
 				y -= float32(p.st.scrollY - p.scrollBase)
 			}
 		}
@@ -1098,6 +1132,7 @@ func attach(c, e *node, pw, ph float32) {
 		h = heightAt(c, w, ph)
 	}
 	at, self := c.attach.anchors()
+	at, self = at.physical(c.rtl()), self.physical(c.rtl())
 	ax, ay := at.fractions()
 	sx, sy := self.fractions()
 	dx, dy := c.relative(pw, ph)

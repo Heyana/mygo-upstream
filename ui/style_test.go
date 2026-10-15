@@ -476,7 +476,7 @@ func TestScrollBoth(t *testing.T) {
 	// Drag the horizontal thumb to the end.
 	tt.Move(50, 50)
 	st := sc.st
-	g := scrollBars(Rect{st.x, st.y, st.w, st.h}, st.barInset, float32(st.contentW), float32(st.contentH), float32(st.scrollX), float32(st.scrollY), st.flags, 6)
+	g := scrollBars(Rect{st.x, st.y, st.w, st.h}, st.barInset, float32(st.contentW), float32(st.contentH), float32(st.scrollX), float32(st.scrollY), st.flags, 6, false)
 	if !g.horizontal || !g.vertical {
 		t.Fatalf("scroll bars %+v", g)
 	}
@@ -499,7 +499,7 @@ func TestScrollbarInsets(t *testing.T) {
 	}, 200, 200)
 	tt.Move(50, 100)
 	st := sc.st
-	g := scrollBars(Rect{st.x, st.y, st.w, st.h}, st.barInset, float32(st.contentW), float32(st.contentH), float32(st.scrollX), float32(st.scrollY), st.flags, 6)
+	g := scrollBars(Rect{st.x, st.y, st.w, st.h}, st.barInset, float32(st.contentW), float32(st.contentH), float32(st.scrollX), float32(st.scrollY), st.flags, 6, false)
 	// The track runs from 50 below the top to 10 above the bottom, 4 in
 	// from the right; the thumb shows a quarter of it, the content's
 	// share in view.

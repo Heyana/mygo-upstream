@@ -9,7 +9,7 @@ import (
 
 func TestCopyModesUseSameSelection(t *testing.T) {
 	loadLib(t)
-	term, err := New(Options{CopyOnSelect: true, Conn: newPipe()})
+	term, err := New(Options{CopyOnSelect: CopyOnSelectClipboard, Conn: newPipe()})
 	if err != nil {
 		t.Fatal(err)
 	}

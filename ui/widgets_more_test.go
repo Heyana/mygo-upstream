@@ -358,7 +358,7 @@ func TestDateInput(t *testing.T) {
 			}
 		})
 	}, 400, 420)
-	if !tt.HasText("2026-10-03") {
+	if !tt.HasText("10/3/2026") {
 		t.Fatalf("texts %q", tt.Texts())
 	}
 	if err := tt.Click("Due"); err != nil {

@@ -84,6 +84,11 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   window share: the focus, Escape, and what is behind them.
 - [Accessibility](accessibility.md): what screen readers see, naming
   elements, roles, descriptions and announcements.
+- [Right to left](right-to-left.md): interfaces laid out from the right
+  for Arabic and Hebrew, logical edges, and what mirrors.
+- [Languages](../i18n.md#native-ui): the window's language and regional
+  formats, numbers and dates written in them, and the controls' own
+  strings.
 - [Drawing and animation](drawing.md): painting on elements, shaping text,
   and values that ease to their targets.
 - [Transitions](transitions.md): elements that move, resize and recolor
@@ -91,7 +96,8 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
 - [Startup](startup.md): a custom startup view, first-frame presentation,
   application readiness and an accessible crossfade to content.
 - [Motion](motion.md): springs that keep their velocity, curves, delays,
-  values thrown by the pointer, keyframes, and knowing when they are done.
+  values thrown by the pointer, keyframes, timelines that play several
+  tweens on one playhead, and knowing when they are done.
 - [Transforms](transforms.md): visual translation, scaling and rotation of
   any element, which the pointer, text input and accessibility follow.
 - [Custom widgets](custom-widgets.md): the widgets without a look that every
@@ -153,6 +159,9 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   name in Finder.
 - [Find bar](find-bar.md): a bar for finding text, with the count of
   matches and the next and previous ones.
+- [Rich text editor](rich-text-editor.md): attributed text with formats,
+  links, headings, lists, tasks and images, the shortcuts and Format menu
+  of word processors, rich copy and paste, and Markdown.
 
 ## Code
 
@@ -161,6 +170,12 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   files of any size.
 - [Diff viewer](diff-viewer.md): the changes between two texts, side by
   side or unified, with the new text editable and changes to review.
+
+## Documents
+
+- [Markdown](markdown.md): CommonMark and GitHub's Markdown, as finished
+  documents or a language model's replies streaming in, selectable and
+  copied as text or Markdown.
 
 ## Dates and colors
 

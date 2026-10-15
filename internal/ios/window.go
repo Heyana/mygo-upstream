@@ -124,5 +124,8 @@ func (*window) StartDataDrag(r platform.DragRequest) {
 		r.Done(transfer.Result{Err: platform.ErrUnsupported})
 	}
 }
-func (*window) CancelDataDrag()                  {}
-func (*window) SetDropFormats([]transfer.Format) {}
+func (*window) CancelDataDrag()                      {}
+func (*window) SetDropFormats([]transfer.Format)     {}
+func (*window) SetDocumentEdited(bool)               {}
+func (*window) SetRepresentedFile(string)            {}
+func (*window) SetUserScripts([]platform.UserScript) {}

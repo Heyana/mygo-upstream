@@ -3,7 +3,8 @@ package ui
 // Split lays out first and second side by side, with a divider between
 // them that the user drags to resize them, or moves with the arrows once
 // it has the keyboard focus: *size is the width of first, which the
-// divider keeps 40 DIPs from either edge. Changed reports a move.
+// divider keeps 40 DIPs from either edge. Changed reports a move. Right to
+// left (Direction), first is on the right.
 //
 //	ui.Split(c, &app.sidebar, app.files, app.editor).Fill()
 func coreSplit(c *context, size *float32, first, second func()) *node {
@@ -63,7 +64,7 @@ func split(c *context, size *float32, first, second func(), vertical bool) *node
 			a.Children(first)
 
 			// The line takes the focus between the panes, in their order.
-			div := coreBox(c).Shrink(0).Focusable().Role(RoleSplitter).Label("Divider")
+			div := coreBox(c).Shrink(0).Focusable().Role(RoleSplitter).Label(c.texts().Divider())
 			div.widget = "Divider"
 			div.flags |= flagOwnRing
 			if vertical {
@@ -71,7 +72,8 @@ func split(c *context, size *float32, first, second func(), vertical bool) *node
 			} else {
 				div.Width(1)
 			}
-			back, forth := KeyLeft, KeyRight
+			// The arrows move the line the way they point.
+			back, forth := div.arrows()
 			if vertical {
 				back, forth = KeyUp, KeyDown
 			}
@@ -99,16 +101,19 @@ func split(c *context, size *float32, first, second func(), vertical bool) *node
 			if vertical {
 				handle.Left(0).Right(0).Top(*size - (grip-1)/2).Height(grip).Cursor(CursorResizeNS)
 			} else {
-				handle.Top(0).Bottom(0).Left(*size - (grip-1)/2).Width(grip).Cursor(CursorResizeEW)
+				handle.Top(0).Bottom(0).Start(*size - (grip-1)/2).Width(grip).Cursor(CursorResizeEW)
 			}
 			// A press there focuses the line, as a press on it would.
 			dx, dy, held := handle.Dragged()
 			handle.afterInput(func() {
 				if held {
 					div.Focus()
-					if vertical {
+					switch {
+					case vertical:
 						set(*size + dy)
-					} else {
+					case handle.rtl():
+						set(*size - dx)
+					default:
 						set(*size + dx)
 					}
 				}

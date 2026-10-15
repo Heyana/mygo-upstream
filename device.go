@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/egoist/mygo/internal/platform"
@@ -122,14 +121,6 @@ func (ScannerModule) ScanCode(ctx context.Context, o ScanOptions) (string, error
 // a usable connection (or with cellular data off for the app), "timeout",
 // "canceled" or "failed". Use errors.As.
 type NetworkError = platform.NetworkError
-
-// NetworkModule prepares the system network for Go's own sockets.
-type NetworkModule struct {
-	mu       sync.Mutex
-	prepared bool
-}
-
-var Network = &NetworkModule{}
 
 // Prepare makes one HEAD request to an https URL through the system network
 // stack, before an app opens raw sockets with package net. On iOS this

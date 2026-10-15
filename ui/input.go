@@ -245,7 +245,12 @@ func (rt *engine) pointerMove(x, y float32) {
 		ly += s.y
 		if d.horizontal {
 			if travel := g.hTrack.W - 4 - g.h.W; travel > 0 {
-				s.scrollTo(dragTo(d.from, lx-d.start, travel, d.contentW-float64(s.w), s.contentW-float64(s.w)), s.scrollY)
+				moved := lx - d.start
+				if s.rtl {
+					// The offset counts from the right.
+					moved = -moved
+				}
+				s.scrollTo(dragTo(d.from, moved, travel, d.contentW-float64(s.w), s.contentW-float64(s.w)), s.scrollY)
 			}
 		} else if travel := g.vTrack.H - 4 - g.v.H; travel > 0 {
 			s.scrollTo(s.scrollX, dragTo(d.from, ly-d.start, travel, d.contentH-float64(s.h), s.contentH-float64(s.h)))
@@ -459,7 +464,10 @@ func (rt *engine) scroll(dx, dy float32, mods Modifiers, precise bool) {
 	if h := rt.handler(chain); h != nil && rt.deliver(h, InputEvent{Kind: InputScroll, DX: dx, DY: dy, Mods: mods, Precise: precise}) {
 		return
 	}
-	if mods&Shift != 0 && dx == 0 {
+	// Shift turns the wheel sideways: down is toward the end, which is
+	// to the left right to left.
+	sideways := mods&Shift != 0 && dx == 0
+	if sideways {
 		dx, dy = dy, 0
 	}
 	for _, id := range chain {
@@ -468,6 +476,9 @@ func (rt *engine) scroll(dx, dy float32, mods Modifiers, precise bool) {
 			continue
 		}
 		sx, sy := s.vector(rt.pointerX, rt.pointerY, dx, dy)
+		if sideways && s.rtl {
+			sx = -sx
+		}
 		if scrollBy(s, sx, sy) {
 			rt.requestFrame()
 			return
@@ -493,12 +504,16 @@ func dragTo(from float64, moved, travel float32, reach, now float64) float64 {
 // content's size as the drag started.
 func (d *scrollDrag) bars(width float32) scrollGeometry {
 	s := d.st
-	return scrollBars(Rect{s.x, s.y, s.w, s.h}, s.barInset, float32(d.contentW), float32(d.contentH), float32(s.scrollX), float32(s.scrollY), s.flags, width)
+	return scrollBars(Rect{s.x, s.y, s.w, s.h}, s.barInset, float32(d.contentW), float32(d.contentH), float32(s.scrollX), float32(s.scrollY), s.flags, width, s.rtl)
 }
 
 // scrollBy scrolls a container by dx, dy within its content, and reports
-// whether it moved.
+// whether it moved. dx moves the content's view to the right, which,
+// right to left, is back toward its start.
 func scrollBy(s *state, dx, dy float32) bool {
+	if s.rtl {
+		dx = -dx
+	}
 	x, y := s.scrollX, s.scrollY
 	if dy != 0 && s.flags&flagScrollY != 0 {
 		y = max(0, min(y+float64(dy), s.contentH-float64(s.h)))
@@ -636,6 +651,14 @@ func (rt *engine) keyDownPhysical(mods Modifiers, key, physical Key, repeat bool
 	}
 	if h := rt.focusHandler(); h != nil && !rt.claimed(k) && rt.deliver(h, InputEvent{Kind: InputKeyDown, Key: key, PhysicalKey: physical, Mods: mods, Repeat: repeat}) {
 		rt.blinkStart = time.Now()
+		return true
+	}
+	if s := rt.states[rt.focused]; s != nil && s.editor != nil && s.editor.onTextKey != nil && s.flags&flagEditable != 0 &&
+		!typesText(k) && (s.editor.wants(k) || !rt.claimed(k)) && s.editor.textKey(k) {
+		// OnTextKey took it as it came, as HandleInput does, but after the
+		// keys and text before it, which it reads.
+		rt.blinkStart = time.Now()
+		rt.requestFrame()
 		return true
 	}
 	if (key == KeyContextMenu && mods == 0 || key == KeyF10 && mods == Shift) && !rt.claimed(k) && rt.menuKey() {
@@ -866,7 +889,12 @@ func (rt *engine) editEvent(ev editEvent) {
 			return
 		}
 		kind := map[editKind]InputKind{editInsert: InputText, editCompose: InputCompose, editCommand: InputCommand}[ev.kind]
-		if kind != 0 && rt.deliver(h, InputEvent{Kind: kind, Text: ev.text, Caret: ev.caret}) {
+		handled := kind != 0 && rt.deliver(h, InputEvent{Kind: kind, Text: ev.text, Caret: ev.caret})
+		if !handled && kind == InputCommand && ev.text == "pasteAndMatchStyle" {
+			// A handler of text without styles pastes it as Paste does.
+			handled = rt.deliver(h, InputEvent{Kind: kind, Text: "paste"})
+		}
+		if handled {
 			rt.blinkStart = time.Now()
 		}
 		return
@@ -897,7 +925,7 @@ func (rt *engine) updateTextInput() {
 	var t platform.TextInputState
 	base := 0
 	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !rt.snapshotTextInput(s) && rt.windowFocus() && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
-		t.Active, t.Client = true, s.textAdapter
+		t.Active, t.Client, t.NoInputMethod = true, s.textAdapter, s.noIME
 		sel := s.textAdapter.Selection()
 		caret := sel.Caret()
 		if bounds, _, ok := s.textAdapter.BoundsForRange(TextInputRange{Start: caret, End: caret}); ok {
@@ -909,7 +937,7 @@ func (rt *engine) updateTextInput() {
 	} else if s != nil && s.editor == nil && s.input != nil && s.takesText && rt.windowFocus() {
 		// An element taking text itself: no text around the caret.
 		t.Options = s.inputOptions.nativeOptions()
-		t.Active = true
+		t.Active, t.NoInputMethod = true, s.noIME
 		if s.textContext != nil {
 			t.Text, t.Start = s.textContext()
 			t.Start = max(0, min(t.Start, len([]rune(t.Text))))
@@ -1361,9 +1389,8 @@ func (d *dragTrack) velocities(now time.Time) [4]float32 {
 	return [4]float32{(newest.x - oldest.x) / dt, (newest.y - oldest.y) / dt, (newest.wx - oldest.wx) / dt, (newest.wy - oldest.wy) / dt}
 }
 
-// Changed applies pending input to the controls built so far and reports
-// whether this widget's value changed in this build pass. Configure controls
-// before querying their response; the bound value is updated before returning.
+// Changed reports whether this widget's value changed in this build pass,
+// by the input it took as its constructor returned.
 func (e *node) Changed() bool {
 	if e.hasState() {
 		e.c.rt.applyInputs()
@@ -1375,9 +1402,8 @@ func (e *node) Changed() bool {
 	return false
 }
 
-// Submitted applies pending input to the controls built so far and reports
-// whether Enter was pressed in a single-line text input. Configure controls
-// before querying their response; the bound value is updated before returning.
+// Submitted reports whether Enter was pressed in a single-line text input
+// in this build pass.
 func (e *node) Submitted() bool {
 	if !e.hasState() {
 		return false
@@ -1408,7 +1434,7 @@ func (rt *engine) scrollbarPress(chain []uint64, x, y float32) bool {
 		lx, ly := s.local(x, y)
 		lx += s.x
 		ly += s.y
-		g := scrollBars(Rect{s.x, s.y, s.w, s.h}, s.barInset, float32(s.contentW), float32(s.contentH), float32(s.scrollX), float32(s.scrollY), s.flags, rt.c.theme.scrollbarWidth())
+		g := scrollBars(Rect{s.x, s.y, s.w, s.h}, s.barInset, float32(s.contentW), float32(s.contentH), float32(s.scrollX), float32(s.scrollY), s.flags, rt.c.theme.scrollbarWidth(), s.rtl)
 		d := &rt.scrollDrag
 		w, h := float64(s.w), float64(s.h)
 		switch {
@@ -1433,7 +1459,8 @@ func (rt *engine) scrollbarPress(chain []uint64, x, y float32) bool {
 					s.track.glide = nil
 				}
 				d.contentW, d.contentH = s.contentW, s.contentH
-			case lx < g.h.X:
+			case (lx < g.h.X) != s.rtl:
+				// Toward the start.
 				s.scrollTo(max(0, s.scrollX-w*0.9), s.scrollY)
 			default:
 				s.scrollTo(min(s.contentW-w, s.scrollX+w*0.9), s.scrollY)

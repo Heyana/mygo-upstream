@@ -242,27 +242,30 @@ func TestFlyoutEscape(t *testing.T) {
 	parent := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
 	parent.Focus()
 	eventually(t, "the parent focused", parent.IsFocused)
-	var handled atomic.Bool
+	var handled, registered, received atomic.Bool
 	native := mygo.NewFlyout(mygo.FlyoutOptions{Parent: parent, Width: 150, Height: 100, Focusable: true, Content: ui.View(func(c *ui.Context) {
-		if handled.Load() {
-			c.Shortcut(0, ui.KeyEscape)
+		enabled := handled.Load()
+		if enabled && c.Shortcut(0, ui.KeyEscape) {
+			received.Store(true)
 		}
+		registered.Store(enabled)
 	})})
 	defer native.Destroy()
 	eventually(t, "the flyout focused", native.IsFocused)
 	handled.Store(true)
-	native.Invalidate() // its shortcut registers in a frame
-	time.Sleep(200 * time.Millisecond)
+	native.Invalidate() // keys route through the previous frame's shortcuts
+	eventually(t, "the Escape shortcut registered", registered.Load)
 	if !pressEscape(native) {
 		t.Skip("keys not available on this platform")
 	}
-	time.Sleep(500 * time.Millisecond)
+	// Posting the native key does not wait for the content to receive it.
+	eventually(t, "the content handling Escape", func() bool { return received.Load() || native.IsDestroyed() })
 	if native.IsDestroyed() {
 		t.Fatal("an Escape the content handled closed the flyout")
 	}
 	handled.Store(false)
 	native.Invalidate()
-	time.Sleep(200 * time.Millisecond)
+	eventually(t, "the Escape shortcut removed", func() bool { return !registered.Load() })
 	pressEscape(native)
 	eventually(t, "the flyout of native UI closed", native.IsDestroyed)
 

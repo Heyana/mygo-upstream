@@ -5,9 +5,11 @@ package mygo
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"image/png"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -406,5 +408,32 @@ func TestContentBackgroundKeepsDesktopPolicy(t *testing.T) {
 	onMain(func() { s.Frame() })
 	if got := onMainValue(func() platform.Color { return fw.Background }); got != before {
 		t.Fatalf("desktop native background changed from %+v to %+v", before, got)
+	}
+}
+
+// TestContentMenuRightToLeft shows the context menu of an element laid
+// out right to left right to left, and others left to right.
+func TestContentMenuRightToLeft(t *testing.T) {
+	view := func(c *ui.Context) {
+		ui.Row(c).Fill().Children(func() {
+			ui.Box(c).Size(100, 100).ContextMenu(func(m *ui.Menu) { m.Item("Left to right") })
+			ui.Row(c).Direction(ui.RightToLeft).Size(100, 100).ContextMenu(func(m *ui.Menu) { m.Item("Right to left") })
+		})
+	}
+	_, _, s := contentWindow(t, view)
+	for _, x := range []float64{50, 150} {
+		onMain(func() {
+			s.Send(platform.SurfaceEvent{Kind: platform.PointerDown, X: x, Y: 50, Button: 1})
+			s.Send(platform.SurfaceEvent{Kind: platform.PointerUp, X: x, Y: 50, Button: 1})
+			s.Frame()
+		})
+		onMain(func() {}) // the menu, posted
+	}
+	var got []string
+	for _, p := range fb.Popups() {
+		got = append(got, fmt.Sprintf("%s %v", p.Menu.Items[0].Label, p.Menu.RightToLeft))
+	}
+	if want := []string{"Left to right false", "Right to left true"}; !slices.Equal(got, want) {
+		t.Errorf("the menus shown are %q, want %q", got, want)
 	}
 }

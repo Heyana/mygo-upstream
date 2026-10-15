@@ -1,9 +1,5 @@
 package platform
 
-import "errors"
-
-var ErrSecretNotFound = errors.New("mygo: secret not found")
-
 // SecureStorage stores small binary values in the system's encrypted store.
 // Native work may run off-thread, but every callback runs on the main thread
 // exactly once. Implementations do not substitute unencrypted files.

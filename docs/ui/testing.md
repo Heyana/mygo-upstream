@@ -36,8 +36,10 @@ panics where the second key was given, as apps only log it.
   `tt.TextCaret` returns where input methods would compose.
 - **Menus.** `tt.RightClick` opens a context menu, which `tt.Menu` lists and
   `tt.ChooseMenuItem("Move to", "Archive")` chooses from.
-- **The window.** `tt.SetSize`, `tt.SetScale`, `tt.SetDark` and
-  `tt.SetPreferences` change the window and the desktop's settings;
+- **The window.** `tt.SetSize`, `tt.SetScale`, `tt.SetDark`,
+  `tt.SetPreferences` and `tt.SetDirection` (lay it out
+  [right to left](right-to-left.md)) change the window and the desktop's
+  settings;
   `tt.SetFocused` takes the keyboard from the window and gives it back.
 - **What it shows.** `tt.Texts`, `tt.HasText`, `tt.Find` (the box of a
   text), `tt.Focused`, `tt.Cursor`, `tt.Clipboard`, `tt.OpenedURLs` and

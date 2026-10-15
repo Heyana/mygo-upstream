@@ -189,6 +189,10 @@ func (s *surface) listen() {
 	s.on(c, "pointerleave", true, func(js.Value) {
 		s.send(platform.SurfaceEvent{Kind: platform.PointerLeave})
 	})
+	// iOS sends a tap's mouse events even though its pointerdown was
+	// canceled: the mousedown would move the focus to the canvas, and the
+	// touch keyboard would hide as soon as it showed.
+	s.on(c, "mousedown", false, func(e js.Value) { e.Call("preventDefault") })
 	s.on(c, "contextmenu", false, func(e js.Value) { e.Call("preventDefault") })
 	s.on(c, "wheel", false, func(e js.Value) {
 		e.Call("preventDefault")
@@ -331,8 +335,24 @@ func (s *surface) listen() {
 		if data.IsNull() || data.IsUndefined() {
 			return
 		}
+		// The text formats pasted: plain text, HTML, and those of apps.
+		var reps []transfer.Representation
+		types := data.Get("types")
+		for i := range types.Length() {
+			f := types.Index(i).String()
+			if f == "Files" {
+				continue
+			}
+			if v := data.Call("getData", f).String(); v != "" {
+				reps = append(reps, transfer.Bytes(transfer.Format(f), []byte(v)))
+			}
+		}
 		s.w.b.mu.Lock()
 		s.w.b.clip = data.Call("getData", "text/plain").String()
+		s.w.b.clipData = transfer.Data{}
+		if len(reps) > 0 {
+			s.w.b.clipData = transfer.New(transfer.NewItem(reps...))
+		}
 		s.w.b.mu.Unlock()
 		s.send(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: "paste"})
 	})
@@ -350,10 +370,19 @@ func (s *surface) copy(e js.Value, cmd string) {
 	}
 	s.copied = false
 	s.w.b.mu.Lock()
-	text := s.w.b.clip
+	text, all := s.w.b.clip, s.w.b.clipData
 	s.w.b.mu.Unlock()
 	if data := e.Get("clipboardData"); !data.IsNull() && !data.IsUndefined() && text != "" {
 		data.Call("setData", "text/plain", text)
+		// The other text formats copied, as a rich text's HTML.
+		for _, f := range all.Formats() {
+			if f == transfer.Text || f == transfer.FileList || f == transfer.PNG {
+				continue
+			}
+			if b, err := all.Read(f); err == nil {
+				data.Call("setData", string(f), string(b))
+			}
+		}
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 func TestMobileLongPressSelectsAndExpandsWithoutRemoteMouse(t *testing.T) {
 	loadLib(t)
 	conn := newPipe()
-	term, err := New(Options{CopyOnSelect: true, Conn: conn, FixedCols: 80, FixedRows: 20})
+	term, err := New(Options{CopyOnSelect: CopyOnSelectClipboard, Conn: conn, FixedCols: 80, FixedRows: 20})
 	if err != nil {
 		t.Fatal(err)
 	}

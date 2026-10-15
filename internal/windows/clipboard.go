@@ -106,7 +106,11 @@ func clipboardFormats() ([]transfer.Format, map[transfer.Format]uint16) {
 		if !slices.Contains(offered, f) {
 			offered = append(offered, f)
 		}
-		if nativeFormats[f] == 0 || oleRegisteredFormatName(id) == string(f) {
+		// The registered "PNG" format, as browsers and Office copy it,
+		// comes before bitmaps, whose alpha a DIB may lose, as ReadImage
+		// reads it.
+		if nativeFormats[f] == 0 || oleRegisteredFormatName(id) == string(f) ||
+			id == uint16(cfPNG) && oleRegisteredFormatName(nativeFormats[f]) != string(f) {
 			nativeFormats[f] = id
 		}
 		if f == transfer.FileList {

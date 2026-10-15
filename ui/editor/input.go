@@ -19,7 +19,22 @@ const scrollbarWidth = 10
 
 // input takes the editor's input as it comes.
 func (ed *editor) input(ev ui.InputEvent) bool {
+	// The key after the first of a chord is the chord's, as VS Code's
+	// keybindings resolve chords before an extension's type command.
+	chord := ed.chord != nil && ev.Kind == ui.InputKeyDown
+	if !chord && ed.offer(ev) {
+		return true
+	}
 	return ed.retry(func() bool { return ed.dispatch(ev) })
+}
+
+// offer gives the app's OnInput an event before the editor, once, and
+// reports whether it took it. It is not retried with the editor's own
+// handling: what the app does with an event it leaves, as edit the
+// buffer, would happen twice. State's methods the app calls catch up
+// with the buffer themselves.
+func (ed *editor) offer(ev ui.InputEvent) bool {
+	return ed.o.onInput != nil && ed.o.onInput(ev)
 }
 
 // retry runs fn, which edits the text as the editor shows it, again on
@@ -43,7 +58,7 @@ func (ed *editor) dispatch(ev ui.InputEvent) bool {
 	case ui.InputKeyDown:
 		return ed.key(ev)
 	case ui.InputCommand:
-		cmd := map[string]Command{"copy": Copy, "cut": Cut, "paste": Paste, "selectAll": SelectAll,
+		cmd := map[string]Command{"copy": Copy, "cut": Cut, "paste": Paste, "pasteAndMatchStyle": Paste, "selectAll": SelectAll,
 			"undo": Undo, "redo": Redo, "delete": Backspace}[ev.Text]
 		if cmd != NoCommand {
 			ed.run(cmd)
@@ -622,7 +637,25 @@ func (ed *editor) targets(r *ui.TextInputRange) []ui.TextInputRange {
 }
 
 func (ed *editor) ReplaceText(r *ui.TextInputRange, s string) {
+	// Text typed at the selection is input; committing a composition, or
+	// replacing other text, as the accents of press and hold replace the
+	// letter before the caret, is the input method's.
+	if !ed.markedActive && ed.atSelection(r) && ed.offer(ui.InputEvent{Kind: ui.InputText, Text: s}) {
+		return
+	}
 	ed.retry(func() bool { ed.replaceText(r, s); return true })
+}
+
+// atSelection reports whether an input method's range is the newest
+// selection: nil, or the same range.
+func (ed *editor) atSelection(r *ui.TextInputRange) bool {
+	if r == nil {
+		return true
+	}
+	ed.sync()
+	t := &ed.view.text
+	p := ed.primary()
+	return t.FromUTF16(min(r.Start, r.End)) == p.start() && t.FromUTF16(max(r.Start, r.End)) == p.end()
 }
 
 func (ed *editor) replaceText(r *ui.TextInputRange, s string) {

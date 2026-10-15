@@ -384,3 +384,12 @@ func TestDragSurface(handle uintptr, points [][2]float64) bool {
 func TestRightClickSurface(handle uintptr, x, y float64) bool {
 	return clickSurface(handle, x, y, 3)
 }
+
+// TestHasRecentItem reports whether the shared recent files list holds the
+// file at path, as App.AddRecentDocument put it there.
+func TestHasRecentItem(path string) bool {
+	return gtkRecentManagerHasItem(gtkRecentManagerGetDefault(), cs(fileURI(path)))
+}
+
+// TestWindowTitle returns the title GTK gives a window.
+func TestWindowTitle(handle uintptr) string { return goStr(gtkWindowGetTitle(handle)) }

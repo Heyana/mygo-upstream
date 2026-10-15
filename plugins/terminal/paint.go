@@ -62,7 +62,8 @@ type boxCell struct {
 func (v *view) layout(r ui.Rect, scale float32) {
 	t := v.t
 	t.mu.Lock()
-	fk := t.opts.Font.key(scale)
+	f := t.font()
+	fk := f.key(scale)
 	cols, rows, fit := t.opts.FixedCols, t.opts.FixedRows, t.opts.FitToView
 	t.mu.Unlock()
 	v.ox, v.oy = int(math.Round(padX*float64(scale))), int(math.Round(padY*float64(scale)))

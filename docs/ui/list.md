@@ -63,7 +63,10 @@ behaves and to move it:
   above them, as when older messages load.
 - `FollowEnd` starts the list at its end, and keeps the end in view as rows
   come or grow, until the user scrolls away from it, as a chat or a log
-  does; scrolling back to the end follows it again.
+  does; scrolling back to the end follows it again. `FollowAnimation`
+  makes it glide there, as a spring (`&ui.Smooth`) or a curve, rather
+  than show the end at once: what is added comes up from below, as the
+  chat apps scroll, and the user scrolling stops it.
 - `Header` names the rows heading sections: the header of the section at
   the top stays pinned there while its rows scroll under it, until the next
   header pushes it away. Give headers a background.
@@ -132,6 +135,7 @@ A chat:
 ```go
 app.chat.Key = func(i int) any { return app.messages[i].ID }
 app.chat.FollowEnd = true
+app.chat.FollowAnimation = &ui.Smooth
 if first, _ := app.chat.Visible(); first < 5 && app.more {
 	app.loadOlder() // above the messages in view, which stay put
 }

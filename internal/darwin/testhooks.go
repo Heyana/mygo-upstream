@@ -5,6 +5,7 @@ package darwin
 import (
 	"fmt"
 	"math"
+	"os"
 	"sync"
 	"unsafe"
 
@@ -58,6 +59,13 @@ func TestPerformKeyEquivalent(key string, shift bool) bool {
 		handled = sendBool(send(theBackend.app, "mainMenu"), "performKeyEquivalent:", uintptr(ev))
 	})
 	return handled
+}
+
+// TestOnScreen reports whether some of a window shows on screen, as the
+// window server reports once it put the window there.
+func TestOnScreen(handle uintptr) bool {
+	const occlusionStateVisible = 1 << 1
+	return sendInt(id(handle), "occlusionState")&occlusionStateVisible != 0
 }
 
 // TestEndSheet ends the sheet attached to a window as if its first button
@@ -221,6 +229,23 @@ func TestWebViewAttached(handle uintptr) bool {
 	return w != nil && send(w.web, "window") == w.win
 }
 
+// TestIsFrontmost reports whether the application is the frontmost one,
+// which NSApp's isActive does not tell while a nonactivating panel is the
+// key window: it reports the app active then.
+func TestIsFrontmost() bool {
+	var front bool
+	withPool(func() {
+		app := send(send(class("NSWorkspace"), "sharedWorkspace"), "frontmostApplication")
+		front = app != 0 && sendInt(app, "processIdentifier") == os.Getpid()
+	})
+	return front
+}
+
+// TestCollectionBehavior returns a window's NSWindowCollectionBehavior.
+func TestCollectionBehavior(handle uintptr) uint {
+	return uint(sendInt(id(handle), "collectionBehavior"))
+}
+
 // TestDockInspector opens the web inspector of a window docked to it, and
 // reports whether the window has one.
 func TestDockInspector(handle uintptr) bool {
@@ -310,6 +335,19 @@ func TestDockMenu(click int) []string {
 		}
 	})
 	return titles
+}
+
+// TestRecentDocuments returns the paths of the documents the app recorded
+// with App.AddRecentDocument and did not clear, in the order the system
+// keeps them.
+func TestRecentDocuments() []string {
+	var paths []string
+	withPool(func() {
+		for _, u := range arrayItems(send(send(class("NSDocumentController"), "sharedDocumentController"), "recentDocumentURLs")) {
+			paths = append(paths, goString(send(u, "path")))
+		}
+	})
+	return paths
 }
 
 // TestFullScreenHidesToolbar reports whether a window asks to hide its
@@ -732,4 +770,69 @@ func TestObserve(handle uintptr) (stop func()) {
 			}
 		})
 	}
+}
+
+// TestDocumentChrome describes what a window's title bar shows of its
+// document: the title, the file of the proxy icon, whether the icon
+// shows, and the dot of an edited document.
+func TestDocumentChrome(handle uintptr) (title, file string, icon, edited bool) {
+	withPool(func() {
+		w := id(handle)
+		title = goString(send(w, "title"))
+		if u := send(w, "representedURL"); u != 0 {
+			file = goString(send(u, "path"))
+		}
+		const documentIconButton = 4 // NSWindowDocumentIconButton
+		if b := send(w, "standardWindowButton:", documentIconButton); b != 0 {
+			icon = !sendBool(b, "isHidden")
+		}
+		edited = sendBool(w, "isDocumentEdited")
+	})
+	return
+}
+
+// TestSheet returns the texts of the alert attached to a window as a
+// sheet, and its button titles in the order the alert was given them
+// (their tags), which TestEndSheetButton takes.
+func TestSheet(handle uintptr) (texts, buttons []string, ok bool) {
+	withPool(func() {
+		sheet := send(id(handle), "attachedSheet")
+		if sheet == 0 {
+			return
+		}
+		ok = true
+		tagged := map[int]string{}
+		var walk func(v id)
+		walk = func(v id) {
+			switch {
+			case sendBool(v, "isKindOfClass:", uintptr(class("NSButton"))):
+				if t := goString(send(v, "title")); t != "" {
+					tagged[sendInt(v, "tag")-nsAlertFirstButtonReturn] = t
+				}
+			case sendBool(v, "isKindOfClass:", uintptr(class("NSTextField"))):
+				if t := goString(send(v, "stringValue")); t != "" {
+					texts = append(texts, t)
+				}
+			}
+			for _, sub := range arrayItems(send(v, "subviews")) {
+				walk(sub)
+			}
+		}
+		walk(send(sheet, "contentView"))
+		for i := 0; i < len(tagged); i++ {
+			buttons = append(buttons, tagged[i])
+		}
+	})
+	return
+}
+
+// TestEndSheetButton ends the alert attached to a window as a sheet as if
+// its button i, in the order the alert was given them, was clicked.
+func TestEndSheetButton(handle uintptr, i int) bool {
+	sheet := send(id(handle), "attachedSheet")
+	if sheet == 0 {
+		return false
+	}
+	send(id(handle), "endSheet:returnCode:", uintptr(sheet), uintptr(nsAlertFirstButtonReturn+i))
+	return true
 }

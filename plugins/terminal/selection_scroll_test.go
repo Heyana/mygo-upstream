@@ -14,7 +14,7 @@ func TestSelectionDragScrollsAcrossPagesAtViewportEdges(t *testing.T) {
 		for _, tracking := range []bool{false, true} {
 			t.Run(fmt.Sprintf("scale%g-tracking%v", scale, tracking), func(t *testing.T) {
 				conn := newPipe()
-				term, err := New(Options{CopyOnSelect: true, Conn: conn, SelectOnDrag: true, NoBlink: true})
+				term, err := New(Options{CopyOnSelect: CopyOnSelectClipboard, Conn: conn, SelectOnDrag: true, NoBlink: true})
 				if err != nil {
 					t.Fatal(err)
 				}

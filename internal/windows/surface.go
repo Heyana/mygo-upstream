@@ -307,7 +307,9 @@ func cursorHandle(c platform.Cursor) uintptr {
 }
 
 func (s *surface) SetTextInput(t platform.TextInputState) {
-	active, caret := t.Active, t.Caret
+	// Without input methods, the window has no input context: keys type
+	// the layout's characters, as WM_CHAR, as winit's do.
+	active, caret := t.Active && !t.NoInputMethod, t.Caret
 	if s.input.Active && s.input.Client != t.Client {
 		s.clientComposition.Reset()
 		if himc, _, _ := procImmGetContext.Call(s.hwnd); himc != 0 {
