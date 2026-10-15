@@ -110,6 +110,30 @@ func TestComboboxInlineEscapeClosesContainingDialog(t *testing.T) {
 	}
 }
 
+func TestComboboxInlineFieldLeavesEscapeToDialog(t *testing.T) {
+	open, query := true, ""
+	tt := NewTester(func(c *Context) {
+		Modal(c, &open, func() {
+			p := ComboboxBase(c, &query)
+			p.Input.Label("Search").AutoFocus()
+			p.Inline(func(panel Element) {
+				p.Item("Alpha").Children(func() { Text(c, "Alpha") })
+			})
+			p.Chosen()
+		})
+	}, 400, 300)
+	tt.Type("al")
+	if !tt.Focused("Search") {
+		t.Fatal("the field did not take the focus")
+	}
+	// The field takes its input as ComboboxBase returns, before Inline in
+	// this build says the options are inline.
+	tt.Key(0, KeyEscape)
+	if open {
+		t.Fatal("Escape in the field did not close the containing dialog")
+	}
+}
+
 func TestComboboxInlineScrollAndAccessibility(t *testing.T) {
 	query := ""
 	tt := NewTester(func(c *Context) {

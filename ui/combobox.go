@@ -33,7 +33,11 @@ type comboboxParts struct {
 	shown     *string
 	chosen    string
 	isChosen  bool
+	// inline is whether Inline built the options, as it did last build
+	// until this one calls Inline or Popup: the input, taken as the
+	// constructor returns, follows the frame the user acted on.
 	inline    bool
+	wasInline *bool
 }
 
 // ComboboxBase creates a combobox without a look: a text input editing
@@ -78,7 +82,9 @@ func comboboxBase(c *context, text *string, first bool) *comboboxParts {
 		pointer:   coreLocal(in, "pointer", func() [2]float32 { return [2]float32{} }),
 		typed:     coreLocal(in, "typed", func() bool { return false }),
 		shown:     coreLocal(in, "shown", func() string { return "" }),
+		wasInline: coreLocal(in, "inline", func() bool { return false }),
 	}
+	p.inline = *p.wasInline
 	in.afterInput(func() {
 		p.chosen, p.isChosen = "", false
 		rt := c.rt
@@ -176,7 +182,7 @@ func (p *comboboxParts) Filtering() bool { return *p.typed }
 // dialog, and an empty panel stays visible so fn can show an empty-state message.
 // Call either Inline or Popup once per build, before asking Chosen.
 func (p *comboboxParts) Inline(fn func(panel *node)) *node {
-	p.inline = true
+	p.inline, *p.wasInline = true, true
 	*p.open = true
 	p.next, p.items = p.next[:0], p.items[:0]
 	panel := coreBox(p.c).Role(RoleList)
@@ -193,6 +199,7 @@ func (p *comboboxParts) Inline(fn func(panel *node)) *node {
 // the panel, or nil while closed or without options.
 func (p *comboboxParts) Popup(fn func(panel *node)) *node {
 	c := p.c
+	p.inline, *p.wasInline = false, false
 	p.next, p.items = p.next[:0], p.items[:0]
 	if !*p.open {
 		*p.values, *p.shown = (*p.values)[:0], ""
