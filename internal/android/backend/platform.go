@@ -521,6 +521,18 @@ func (androidShell) TrashItem(string) error { return platform.ErrUnsupported }
 // backend should not make for it.
 func (androidShell) Beep() {}
 
+// FileIcon reports unsupported: the icon a file manager draws is a desktop
+// notion (Finder/Explorer ask the OS for a registered icon), while on Android
+// an app that wants a file's icon decodes the bitmap it already has or loads
+// one from its own resources. There is no path-keyed icon lookup to forward.
+func (androidShell) FileIcon(string, int) ([]byte, error) { return nil, platform.ErrUnsupported }
+
+// OpenApplication reports unsupported: "the application at a path" is a desktop
+// notion too (a .app bundle or an .exe). Android starts apps by package name
+// through an explicit intent, which is a different call with a different
+// argument, so there is nothing to translate path into.
+func (androidShell) OpenApplication(string) error { return platform.ErrUnsupported }
+
 // validateExternalURL checks url against externalSchemes and returns it
 // unchanged.
 //

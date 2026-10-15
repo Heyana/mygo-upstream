@@ -135,6 +135,8 @@ func (w *window) IsLoading() bool { return false }
 
 func (w *window) Eval(js string) {}
 
+func (w *window) SetUserScripts(scripts []platform.UserScript) {}
+
 func (w *window) SetZoom(factor float64) {}
 
 func (w *window) Zoom() float64 { return 0 }

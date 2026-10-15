@@ -81,6 +81,15 @@ func (w *window) Bounds() platform.Rect            { return w.bounds }
 func (w *window) SetContentBounds(r platform.Rect) { w.bounds = r }
 func (w *window) ContentBounds() platform.Rect     { return w.bounds }
 
+// SetRepresentedFile does nothing: the proxy icon it drives is a macOS title
+// bar affordance. Android has no window chrome of its own to draw it in.
+func (w *window) SetRepresentedFile(string) {}
+
+// SetDocumentEdited does nothing, same reason as SetRepresentedFile: the
+// "unsaved changes" dot lives in the close button, which is the platform's
+// window decoration. The core marks the title instead.
+func (w *window) SetDocumentEdited(bool) {}
+
 // Show marks the window visible and asks for a frame. A phone's window is
 // the whole screen and the Activity shows it; there is no separate step.
 func (w *window) Show() {
