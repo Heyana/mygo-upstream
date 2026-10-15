@@ -68,6 +68,53 @@ func DecodeBitmap(data []byte) (*Bitmap, error) {
 	return b, nil
 }
 
+// DecodeBitmapSize decodes an image as DecodeBitmap does and halves it to
+// the size nearest the one it will show at, so that a picture of a camera's
+// size is decoded at the size of the place it shows in rather than at its
+// own.
+//
+// A decoded picture costs four bytes a pixel whether or not its pixels are
+// drawn — a display wants them that way — so a grid whose cells are 200
+// pixels wide and which decodes 480-wide sources holds five times the pixels
+// it can show, and a GPU sampling it sees one pixel of every two and lets
+// the rest shimmer. Decoding at the size it shows at is what every browser
+// and every photo app does with a thumbnail, and it is the difference
+// between a library of a hundred costing fifty megabytes and costing ten.
+//
+// The halving is the drawing's own, each pixel the average of the 2×2 it
+// covers, so what is reachable is the picture's size divided by a power of
+// two, and the nearest of those to maxW by maxH is taken. That is within a
+// factor of the square root of two either way — half to twice the pixels of
+// the place it shows in — which for a photograph is under a pixel of
+// softness, and the alternative, every size, is a resampler and its own
+// tests. Pass a zero maxW or maxH to decode at the picture's own size, which
+// is what DecodeBitmap does.
+func DecodeBitmapSize(data []byte, maxW, maxH int) (*Bitmap, error) {
+	b, err := DecodeBitmap(data)
+	if err != nil {
+		return nil, err
+	}
+	b.shrink(maxW, maxH)
+	return b, nil
+}
+
+// shrink halves the bitmap's picture to the size nearest maxW by maxH. The
+// levels go with it: they were the larger picture's.
+func (b *Bitmap) shrink(maxW, maxH int) {
+	if maxW <= 0 || maxH <= 0 {
+		return
+	}
+	// The axis the picture is furthest over the place it shows in by is the
+	// one that decides: a picture 16:9 in a 16:9 cell is over by as much on
+	// both, and one wider than its cell is over by more across.
+	ratio := math.Max(float64(b.w)/float64(maxW), float64(b.h)/float64(maxH))
+	for n := int(math.Round(math.Log2(ratio))); n > 0; n-- {
+		b.img = halve(b.img)
+	}
+	b.w, b.h = b.img.W, b.img.H
+	b.levels, b.fresh = nil, 0
+}
+
 // Update shows img in place of the bitmap's picture, for one that changes
 // as video does: the GPU keeps the bitmap's texture and uploads the new
 // pixels, where a new Bitmap a frame would make a texture each, and keep
@@ -94,6 +141,42 @@ func (b *Bitmap) Update(img image.Image) {
 
 // Size returns the bitmap's size in pixels, which Image shows as DIPs.
 func (b *Bitmap) Size() (w, h int) { return b.w, b.h }
+
+// opaqueRGBA reports whether every pixel of premultiplied RGBA p is fully
+// opaque, which is when premultiplied and straight RGBA hold the same bytes.
+func opaqueRGBA(p []byte) bool {
+	for i := 3; i < len(p); i += 4 {
+		if p[i] != 255 {
+			return false
+		}
+	}
+	return true
+}
+
+// unpremultiply divides the color channels of premultiplied RGBA p by its
+// alpha, in place, leaving straight RGBA. An alpha of zero leaves no color
+// to divide.
+//
+// It is what the browser's canvas backend needs: scene.Image holds
+// premultiplied pixels, the way a compositor wants them, and a canvas
+// ImageData is straight. The renderers that upload a texture take the pixels
+// as they are, so nothing else uses this.
+func unpremultiply(p []byte) {
+	for i := 0; i+3 < len(p); i += 4 {
+		a := uint32(p[i+3])
+		switch a {
+		case 0:
+			p[i], p[i+1], p[i+2] = 0, 0, 0
+		case 255: // already straight
+		default:
+			// Rounded rather than truncated, so that pixels an encoder
+			// premultiplied and this divides back come out as they went in.
+			p[i] = uint8(min(255, (uint32(p[i])*255+a/2)/a))
+			p[i+1] = uint8(min(255, (uint32(p[i+1])*255+a/2)/a))
+			p[i+2] = uint8(min(255, (uint32(p[i+2])*255+a/2)/a))
+		}
+	}
+}
 
 func (b *Bitmap) imageSize() (float32, float32) {
 	if b == nil {

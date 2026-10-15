@@ -169,6 +169,23 @@ type Reading struct {
 	// second: a window whose frames are user-driven draws none while it is
 	// idle, and a wall-clock rate would report the idle as slowness.
 	FPS float64
+	// PacePerSecond is 1/second of the Mean frame, and 0 when nothing has
+	// been drawn.
+	//
+	// 🔴 It is a pace, not an observed rate, and the name says so because the
+	// old one did not. It answers "if frames kept coming back to back at this
+	// pace, how many would a second hold" — which is `1e9 / Mean` and no
+	// more. It is NOT how many frames the window drew in a second: a page
+	// that draws nothing while it is still has a Mean of 2.5 ms and this
+	// reads 400, while the frames on screen came 63 ms apart. Read as a rate
+	// it says the app runs at 400 fps on a 120 Hz panel, which is impossible
+	// and was believed for a while.
+	//
+	// For a rate, divide the count of frames by the wall-clock span they came
+	// in — the frame ring's `at` is what that needs. This field is for
+	// answering "how much does one frame cost", where the reciprocal is the
+	// honest shape.
+	PacePerSecond float64
 	// Frames is how many frames the process has drawn in all.
 	Frames uint64
 	// Repaints is how many of them were frames that painted again without
@@ -205,6 +222,7 @@ func FrameReading() Reading {
 	r.Last = frameTimes.ring[(frameTimes.next-1+diagFrames)%diagFrames]
 	if r.Mean > 0 {
 		r.FPS = 1e9 / float64(r.Mean.Nanoseconds())
+		r.PacePerSecond = 1e9 / float64(r.Mean.Nanoseconds())
 	}
 	return r
 }
