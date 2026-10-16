@@ -30,6 +30,11 @@ type surface struct {
 	ctx2d         js.Value
 	image         js.Value // ImageData of the frames drawn in memory
 	rgba          []byte
+	// dmgImages caches scratch ImageDatas by size, so PresentDamage
+	// doesn't allocate one per rect: damage rectangles often repeat
+	// (a button, a line of text), differing by a pixel as glyphs change.
+	dmgImages [8]dmgImage
+	dmgImageN int
 
 	// width and height are the canvas's size in DIPs, CSS pixels, and
 	// scale the device pixels of one.
@@ -651,10 +656,34 @@ func (s *surface) PresentDamage(pix []byte, stride, width, height int, damage []
 				dst[x], dst[x+1], dst[x+2], dst[x+3] = r, g, b, a
 			}
 		}
-		img := s.ctx2d.Call("createImageData", dw, dh)
+		img := s.dmgScratch(dw, dh)
 		js.CopyBytesToJS(img.Get("data"), rgba)
 		s.ctx2d.Call("putImageData", img, d.Min.X, d.Min.Y)
 	}
+}
+
+// dmgImage is a scratch ImageData of one size, reused across frames.
+type dmgImage struct {
+	w, h int
+	img  js.Value
+}
+
+// dmgScratch returns a scratch ImageData of dw×dh, reusing a cached one
+// when a rectangle of that size was uploaded before.
+func (s *surface) dmgScratch(dw, dh int) js.Value {
+	for i := 0; i < s.dmgImageN; i++ {
+		if d := &s.dmgImages[i]; d.w == dw && d.h == dh {
+			return d.img
+		}
+	}
+	img := s.ctx2d.Call("createImageData", dw, dh)
+	if s.dmgImageN < len(s.dmgImages) {
+		s.dmgImages[s.dmgImageN] = dmgImage{dw, dh, img}
+		s.dmgImageN++
+	} else {
+		s.dmgImages[0] = dmgImage{dw, dh, img}
+	}
+	return img
 }
 
 func unpremul(c, a byte) byte { return byte(min(255, (int(c)*255+int(a)/2)/int(a))) }
