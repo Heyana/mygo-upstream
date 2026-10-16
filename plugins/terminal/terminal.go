@@ -117,9 +117,10 @@ type Options struct {
 	// Normal ANSI background colors and colored panels retain their colors.
 	AdaptiveColors bool
 	// CopyOnSelect copies what the pointer selects as the selection
-	// ends: CopyOnSelectClipboard to the clipboard, as Ghostty's
-	// copy-on-select = clipboard. Ghostty's primary, the selection
-	// clipboard of Linux, is not there: ui has none.
+	// ends, and what Select All selects: CopyOnSelectClipboard to the
+	// clipboard, as Ghostty's copy-on-select = clipboard. Ghostty's
+	// primary, the selection clipboard of Linux, is not there: ui has
+	// none. SetCopyOnSelect changes it.
 	CopyOnSelect CopyOnSelect
 	// Keybinds bind keys to actions over DefaultKeybinds, as Ghostty's
 	// keybind option: a binding replaces the defaults of its key and
@@ -172,9 +173,9 @@ type Options struct {
 	// then sending as the program reads, then sent; or not taken when the
 	// program has not read it 5 seconds after the offer was written, as a
 	// program that does not read pastes, or one far away over a slow link.
-	// A paste of no text to a program that does not read the clipboard,
-	// which pastes nothing, tells PasteNoText. An app shows a large
-	// image's progress, or why nothing pasted, this way.
+	// A paste of no text to a program that reads neither the clipboard nor
+	// bracketed pastes, which pastes nothing, tells PasteNoText. An app
+	// shows a large image's progress, or why nothing pasted, this way.
 	OnPasteStatus func(p PasteProgress)
 	// OnClipboardRequest asks the app before a program reads the
 	// clipboard, when ClipboardRead is ClipboardAsk; without it the
@@ -314,7 +315,9 @@ const (
 	// offered. It may still, as long as no other paste comes.
 	PasteNotTaken
 	// PasteNoText: the paste had no text, as only an image, and the
-	// program does not read the clipboard, so nothing was pasted.
+	// program reads neither the clipboard nor bracketed pastes (mode
+	// 2004), so nothing was pasted. A program that takes bracketed
+	// pastes gets an empty one.
 	PasteNoText
 )
 
@@ -849,6 +852,14 @@ func (t *Terminal) zoom(z Zoom) {
 	}
 	t.mu.Unlock()
 	t.redraw()
+}
+
+// SetCopyOnSelect changes where a selection is copied as it ends, as
+// Options.CopyOnSelect, as when the user changes a setting.
+func (t *Terminal) SetCopyOnSelect(c CopyOnSelect) {
+	t.mu.Lock()
+	t.opts.CopyOnSelect = c
+	t.mu.Unlock()
 }
 
 // SetTheme changes the colors, as Options.Theme and DarkTheme.

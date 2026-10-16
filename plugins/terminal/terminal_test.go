@@ -35,10 +35,11 @@ func loadLib(t *testing.T) {
 	}
 }
 
-// waitFor runs frames until cond holds.
+// waitFor runs frames until cond holds: what a program writes arrives
+// when it does, on the terminal's reader. The deadline is a hang guard.
 func waitFor(t *testing.T, tt *ui.Tester, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(time.Minute)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
@@ -116,20 +117,39 @@ func (p *pipe) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// take returns what the terminal sent since the last take, once it sent
-// want bytes or a second passed.
-func (p *pipe) take(want int) string {
-	deadline := time.Now().Add(time.Second)
-	for {
-		p.mu.Lock()
-		if len(p.sent) >= want || time.Now().After(deadline) {
-			s := string(p.sent)
-			p.sent = nil
-			p.mu.Unlock()
-			return s
-		}
-		p.mu.Unlock()
-		time.Sleep(time.Millisecond)
+// take returns what term sent since the last take: all that it queued
+// for its Conn before take, which waits until the queue wrote it (see
+// written), and nothing queued after.
+func (p *pipe) take(term *Terminal) string {
+	written(term)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	s := string(p.sent)
+	p.sent = nil
+	return s
+}
+
+// written returns once the input queue of term, which writes to its Conn
+// (or program) from a goroutine of its own, wrote what was queued before,
+// and ran what was queued to run once that was written, as the statuses
+// of a paste: it queues a marker, which the queue reaches in order. A
+// closed queue writes nothing more.
+func written(term *Terminal) {
+	done := make(chan struct{})
+	q := &term.in
+	q.mu.Lock()
+	q.init()
+	if q.closed {
+		q.mu.Unlock()
+		return
+	}
+	q.queue = append(q.queue, queued{done: func() { close(done) }})
+	q.cond.Signal()
+	q.mu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Minute): // a hang guard
+		panic("the terminal's input queue wrote nothing for a minute")
 	}
 }
 func (p *pipe) Close() error {
@@ -340,7 +360,7 @@ func TestKeys(t *testing.T) {
 		} else {
 			tt.Key(mods, k)
 		}
-		if got := conn.take(len(want)); got != want {
+		if got := conn.take(term); got != want {
 			t.Errorf("%v %v %q sent %q, want %q", mods, k, text, got, want)
 		}
 	}
@@ -357,7 +377,7 @@ func TestKeys(t *testing.T) {
 	}
 	// Text without its key, as input methods and Linux send it.
 	tt.Type("世界")
-	if got := conn.take(6); got != "世界" {
+	if got := conn.take(term); got != "世界" {
 		t.Errorf("typed %q", got)
 	}
 	// Programs that ask for the Kitty keyboard protocol get it.
@@ -387,12 +407,12 @@ func TestComposition(t *testing.T) {
 	}
 	tt.Compose("ni", 2)
 	save(t, tt, "composing")
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Errorf("composing sent %q", got)
 	}
 	tt.Compose("你", 1)
 	tt.Type("你")
-	if got := conn.take(3); got != "你" {
+	if got := conn.take(term); got != "你" {
 		t.Errorf("committing sent %q", got)
 	}
 }
@@ -410,20 +430,20 @@ func TestMouse(t *testing.T) {
 	tt.Frame()
 	x, y := cellCenter(term, 2, 3)
 	tt.Press(x, y)
-	if got, want := conn.take(9), "\x1b[<0;3;4M"; got != want {
+	if got, want := conn.take(term), "\x1b[<0;3;4M"; got != want {
 		t.Errorf("press sent %q, want %q", got, want)
 	}
 	x2, y2 := cellCenter(term, 5, 3)
 	tt.Move(x2, y2)
-	if got, want := conn.take(10), "\x1b[<32;6;4M"; got != want {
+	if got, want := conn.take(term), "\x1b[<32;6;4M"; got != want {
 		t.Errorf("drag sent %q, want %q", got, want)
 	}
 	tt.Release(x2, y2)
-	if got, want := conn.take(9), "\x1b[<0;6;4m"; got != want {
+	if got, want := conn.take(term), "\x1b[<0;6;4m"; got != want {
 		t.Errorf("release sent %q, want %q", got, want)
 	}
 	tt.Scroll(x, y, 0, -40)
-	if got := conn.take(30); !strings.HasPrefix(got, "\x1b[<64;3;4M") {
+	if got := conn.take(term); !strings.HasPrefix(got, "\x1b[<64;3;4M") {
 		t.Errorf("wheel sent %q", got)
 	}
 	// Focus reports.
@@ -446,7 +466,7 @@ func TestExit(t *testing.T) {
 		if code != 3 {
 			t.Errorf("exit code = %d", code)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(time.Minute): // a hang guard
 		t.Fatal("no exit")
 	}
 	<-term.Done()
@@ -478,7 +498,7 @@ func TestMenus(t *testing.T) {
 	}
 	tt.SetClipboard("pasted")
 	tt.Command("paste")
-	if got := conn.take(6); got != "pasted" {
+	if got := conn.take(term); got != "pasted" {
 		t.Errorf("Paste sent %q", got)
 	}
 	// The context menu.
@@ -491,7 +511,7 @@ func TestMenus(t *testing.T) {
 	if err := tt.ChooseMenuItem("Paste"); err != nil {
 		t.Fatal(err)
 	}
-	if got := conn.take(5); got != "again" {
+	if got := conn.take(term); got != "again" {
 		t.Errorf("the menu's Paste sent %q", got)
 	}
 	// In the window's language.
@@ -524,7 +544,43 @@ func TestCopyOnSelect(t *testing.T) {
 		if got := tt.Clipboard(); got != want {
 			t.Errorf("CopyOnSelect %v: selecting copied %q, want %q", on, got, want)
 		}
+		tt.Command("selectAll")
+		if on == CopyOnSelectClipboard {
+			want = "hello world"
+		}
+		if got := tt.Clipboard(); got != want {
+			t.Errorf("CopyOnSelect %v: Select All copied %q, want %q", on, got, want)
+		}
 		term.Close()
+	}
+}
+
+func TestSetCopyOnSelect(t *testing.T) {
+	loadLib(t)
+	conn := newPipe()
+	term, err := New(Options{Conn: conn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.Feed([]byte("hello world"))
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	sel := func(from, to int) {
+		x0, y0 := cellCenter(term, from, 0)
+		x1, y1 := cellCenter(term, to, 0)
+		tt.Press(x0-2, y0)
+		tt.Move(x1+2, y1)
+		tt.Release(x1+2, y1)
+	}
+	term.SetCopyOnSelect(CopyOnSelectClipboard)
+	sel(0, 4)
+	if got := tt.Clipboard(); got != "hello" {
+		t.Errorf("turned on, selecting copied %q, want %q", got, "hello")
+	}
+	term.SetCopyOnSelect(CopyOnSelectNone)
+	sel(6, 10)
+	if got := tt.Clipboard(); got != "hello" {
+		t.Errorf("turned off, selecting left %q on the clipboard, want %q", got, "hello")
 	}
 }
 
@@ -553,22 +609,22 @@ func TestCopyAndPasteKeys(t *testing.T) {
 	if got := tt.Clipboard(); got != "some text" {
 		t.Errorf("Control-C copied %q", got)
 	}
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Errorf("Control-C with a selection sent %q", got)
 	}
 	tt.Key(ui.Ctrl, ui.KeyC)
-	if got := conn.take(1); got != "\x03" {
+	if got := conn.take(term); got != "\x03" {
 		t.Errorf("Control-C without a selection sent %q", got)
 	}
 	tt.SetClipboard("by V")
 	tt.Key(ui.Ctrl, ui.KeyV)
-	if got := conn.take(4); got != "by V" {
+	if got := conn.take(term); got != "by V" {
 		t.Errorf("Control-V sent %q", got)
 	}
 	// With nothing to paste, Control-V reaches the program.
 	tt.SetClipboard("")
 	tt.Key(ui.Ctrl, ui.KeyV)
-	if got := conn.take(1); got != "\x16" {
+	if got := conn.take(term); got != "\x16" {
 		t.Errorf("Control-V with an empty clipboard sent %q", got)
 	}
 	tt.Command("selectAll")
@@ -578,7 +634,7 @@ func TestCopyAndPasteKeys(t *testing.T) {
 	}
 	tt.SetClipboard("by Insert")
 	tt.Key(ui.Shift, ui.KeyInsert)
-	if got := conn.take(9); got != "by Insert" {
+	if got := conn.take(term); got != "by Insert" {
 		t.Errorf("Shift-Insert sent %q", got)
 	}
 	// A secondary click copies a selection, else pastes, and shows no menu.
@@ -590,7 +646,7 @@ func TestCopyAndPasteKeys(t *testing.T) {
 		t.Errorf("a secondary click over a selection copied %q", got)
 	}
 	tt.RightClickAt(x, y)
-	if got := conn.take(9); got != "some text" {
+	if got := conn.take(term); got != "some text" {
 		t.Errorf("a secondary click without a selection sent %q", got)
 	}
 	if menu := tt.Menu(); menu != nil {
@@ -615,11 +671,11 @@ func TestUnboundKeys(t *testing.T) {
 	tt.Command("selectAll")
 	tt.SetClipboard("clipboard")
 	tt.Key(ui.Ctrl, ui.KeyC)
-	if got := conn.take(1); got != "\x03" {
+	if got := conn.take(term); got != "\x03" {
 		t.Errorf("Control-C sent %q", got)
 	}
 	tt.Key(ui.Ctrl, ui.KeyV)
-	if got := conn.take(1); got != "\x16" {
+	if got := conn.take(term); got != "\x16" {
 		t.Errorf("Control-V sent %q", got)
 	}
 	if got := tt.Clipboard(); got != "clipboard" {
@@ -719,7 +775,7 @@ func TestKeybindActions(t *testing.T) {
 		t.Error("Shift-Page Down did not scroll back")
 	}
 	tt.Key(ui.Alt, ui.KeyX)
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Errorf("an ignored key sent %q", got)
 	}
 	tt.Key(ui.Alt, ui.KeyA)
@@ -739,11 +795,11 @@ func TestKeybindActions(t *testing.T) {
 	term.Feed([]byte("\x1b[?1049h"))
 	tt.Frame()
 	tt.Key(ui.Shift, ui.KeyPageUp)
-	if got := conn.take(1); got != "\x1b[5;2~" {
+	if got := conn.take(term); got != "\x1b[5;2~" {
 		t.Errorf("Shift-Page Up on the alternate screen sent %q", got)
 	}
 	tt.Key(ui.Alt, ui.KeyK)
-	if got := conn.take(1); got == "" {
+	if got := conn.take(term); got == "" {
 		t.Error("a performable clear took the key on the alternate screen")
 	}
 	// The context menu shows the keys.
@@ -901,7 +957,7 @@ func TestWindowsShell(t *testing.T) {
 	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill() }, 640, 300)
 	select {
 	case <-term.Done():
-	case <-time.After(20 * time.Second):
+	case <-time.After(time.Minute): // a hang guard
 		t.Fatal("cmd did not exit")
 	}
 	tt.Frame()
@@ -960,7 +1016,7 @@ func TestKeyWithoutText(t *testing.T) {
 	// A key that types text, whose text never comes, goes alone when
 	// released.
 	tt.Key(0, ui.KeyB)
-	if got := conn.take(1); got != "b" {
+	if got := conn.take(term); got != "b" {
 		t.Errorf("sent %q", got)
 	}
 }
@@ -973,7 +1029,7 @@ func TestCloseKillsWhatIgnoresHangups(t *testing.T) {
 	term.Close()
 	select {
 	case <-term.Done():
-	case <-time.After(5 * time.Second):
+	case <-time.After(time.Minute): // a hang guard: Close kills it after 2 s
 		t.Fatal("Done was not closed: the program outlived Close")
 	}
 }
@@ -1047,7 +1103,7 @@ func TestCommandClickLinkWithoutOpenLink(t *testing.T) {
 	}
 	// The click on the path, no link without OpenLink, went to the
 	// program; the one on the link did not, nor its release.
-	got := conn.take(18) // two reports, 22 bytes with Control
+	got := conn.take(term) // two reports, 22 bytes with Control
 	if strings.Count(got, "\x1b[<") != 2 || strings.Count(got, ";9;1M") != 1 || strings.Count(got, ";9;1m") != 1 {
 		t.Errorf("sent %q, want the press and the release of the path's click", got)
 	}
@@ -1083,13 +1139,13 @@ func TestOnPasteTakesAPaste(t *testing.T) {
 	if !slices.Equal(seen, []string{"hello", "hello"}) {
 		t.Fatalf("OnPaste saw %q", seen)
 	}
-	if got := conn.take(1); len(got) != 0 {
+	if got := conn.take(term); len(got) != 0 {
 		t.Errorf("a taken paste sent %q", got)
 	}
 	take = false
 	tt.Key(paste, ui.KeyV)
 	tt.Frame()
-	if got := conn.take(5); got != "hello" || len(seen) != 3 {
+	if got := conn.take(term); got != "hello" || len(seen) != 3 {
 		t.Errorf("a paste OnPaste leaves sent %q (seen %q)", got, seen)
 	}
 	// It sees every format, as an image.
@@ -1128,7 +1184,7 @@ func TestOnKeyTakesAKey(t *testing.T) {
 	tt.TypeKey(0, ui.KeyX, "x")
 	tt.TypeKey(0, ui.KeyY, "y")
 	tt.Frame()
-	if got := conn.take(16); got != "<taken>\t<taken>y" {
+	if got := conn.take(term); got != "<taken>\t<taken>y" {
 		t.Errorf("sent %q, want the taken keys' marks in order with Tab and y", got)
 	}
 	if !slices.Equal(seen, []ui.Key{ui.KeyV, ui.KeyTab, ui.KeyX, ui.KeyY}) {
@@ -1179,7 +1235,7 @@ func TestOnScrollTakesTheWheel(t *testing.T) {
 	if len(seen) != 2 {
 		t.Errorf("OnScroll saw %v while the program took the mouse", seen)
 	}
-	if got := conn.take(10); !strings.HasPrefix(got, "\x1b[<64;") {
+	if got := conn.take(term); !strings.HasPrefix(got, "\x1b[<64;") {
 		t.Errorf("wheel sent %q, want a mouse report", got)
 	}
 	// A full-screen program gets it as arrows, unless it turns that off.
@@ -1189,7 +1245,7 @@ func TestOnScrollTakesTheWheel(t *testing.T) {
 	if len(seen) != 2 {
 		t.Errorf("OnScroll saw %v on a full-screen program's screen", seen)
 	}
-	if got := conn.take(9); strings.Count(got, "A") != 3 {
+	if got := conn.take(term); strings.Count(got, "A") != 3 {
 		t.Errorf("wheel sent %q, want three arrows up", got)
 	}
 	term.Feed([]byte("\x1b[?1007l"))
@@ -1235,7 +1291,7 @@ func TestPasteImage(t *testing.T) {
 
 	term.Feed([]byte("\x1b[?5522h"))
 	tt.Key(pasteMods, ui.KeyV)
-	event := conn.take(1)
+	event := conn.take(term)
 	_, after, ok := strings.Cut(event, ":pw=")
 	if !ok || !strings.HasSuffix(event, "\x1b\\") {
 		t.Fatalf("paste sent %q, want a paste event", event)
@@ -1250,7 +1306,7 @@ func TestPasteImage(t *testing.T) {
 	mime := base64.StdEncoding.EncodeToString([]byte("image/png"))
 	read := "\x1b]5522;type=read:pw=" + pw + ":name=" + name + ";" + mime + "\x1b\\"
 	term.Feed([]byte(read))
-	reply := conn.take(len(image) * 4 / 3)
+	reply := conn.take(term)
 	var got []byte
 	for _, pkt := range strings.Split(reply, "\x1b\\") {
 		if _, data, ok := strings.Cut(pkt, "status=DATA:mime="+mime+";"); ok {
@@ -1264,7 +1320,7 @@ func TestPasteImage(t *testing.T) {
 	if !bytes.Equal(got, image) || !strings.HasSuffix(reply, "status=DONE\x1b\\") {
 		t.Errorf("the program read %d bytes of %d; reply ends %q", len(got), len(image), reply[max(0, len(reply)-40):])
 	}
-	time.Sleep(50 * time.Millisecond)
+	// The statuses of the pieces ran on the queue, before take's marker.
 	mu.Lock()
 	if last.Total != int64(len(reply)) {
 		t.Errorf("sent %d bytes of %d, but the reply is %d", last.Sent, last.Total, len(reply))
@@ -1280,24 +1336,30 @@ func TestPasteImage(t *testing.T) {
 	}
 	defer other.Close()
 	other.Feed([]byte("\x1b[?5522h" + read))
-	if sent := conn2.take(1); sent != "" {
+	if sent := conn2.take(other); sent != "" {
 		t.Errorf("a terminal that did not paste answered %q", sent)
 	}
 
 	// Without the mode, the text, bracketed when asked.
 	term.Feed([]byte("\x1b[?5522l\x1b[?2004h"))
 	tt.Key(pasteMods, ui.KeyV)
-	if sent := conn.take(1); sent != "\x1b[200~some text\x1b[201~" {
+	if sent := conn.take(term); sent != "\x1b[200~some text\x1b[201~" {
 		t.Errorf("without the mode, pasted %q", sent)
 	}
-	// Only an image, and no program to read it: nothing, and told so.
+	// Only an image, to a program that takes bracketed pastes: an empty
+	// one, which it reads as a paste of the image, as Claude Code does.
 	tt.SetClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.PNG, image))))
 	tt.Key(pasteMods, ui.KeyV)
-	if sent := conn.take(1); sent != "" {
+	if sent := conn.take(term); sent != "\x1b[200~\x1b[201~" {
+		t.Errorf("with only an image and bracketed paste, pasted %q", sent)
+	}
+	// Only an image, and no program to read it: nothing, and told so.
+	term.Feed([]byte("\x1b[?2004l"))
+	tt.Key(pasteMods, ui.KeyV)
+	if sent := conn.take(term); sent != "" {
 		t.Errorf("with only an image and no mode, pasted %q", sent)
 	}
 
-	time.Sleep(50 * time.Millisecond)
 	mu.Lock()
 	seen := strings.Join(statuses, " ")
 	mu.Unlock()
@@ -1369,7 +1431,7 @@ func TestOnZoom(t *testing.T) {
 	if !slices.Equal(steps(), []int{1}) {
 		t.Errorf("zoomed %v while the program took the mouse", steps())
 	}
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Errorf("a zoom sent %q to the program", got)
 	}
 	// The font size keys.
@@ -1380,7 +1442,7 @@ func TestOnZoom(t *testing.T) {
 	if !slices.Equal(zooms, []Zoom{{Steps: 1}, {Steps: -1}, {Reset: true}}) {
 		t.Errorf("the keys zoomed %v", zooms)
 	}
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Errorf("the zoom keys sent %q to the program", got)
 	}
 	if term.v.font.size != 13 {
@@ -1440,10 +1502,14 @@ func TestPasteData(t *testing.T) {
 	conn := newPipe()
 	var mu sync.Mutex
 	var statuses []PasteStatus
+	notTaken := make(chan struct{})
 	term, err := New(Options{Conn: conn, OnPasteStatus: func(p PasteProgress) {
 		mu.Lock()
 		statuses = append(statuses, p.Status)
 		mu.Unlock()
+		if p.Status == PasteNotTaken {
+			close(notTaken)
+		}
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -1466,7 +1532,7 @@ func TestPasteData(t *testing.T) {
 	))...)
 	term.Feed([]byte("\x1b[?5522h"))
 	term.PasteData(d)
-	event := conn.take(1)
+	event := conn.take(term)
 	_, after, ok := strings.Cut(event, ":pw=")
 	if !ok {
 		t.Fatalf("paste sent %q, want a paste event", event)
@@ -1477,7 +1543,11 @@ func TestPasteData(t *testing.T) {
 	if string(listing) != "text/uri-list image/jpeg text/plain\n" {
 		t.Errorf("offered %q", listing)
 	}
-	time.Sleep(150 * time.Millisecond)
+	select {
+	case <-notTaken:
+	case <-time.After(time.Minute):
+		t.Fatal("no PasteNotTaken")
+	}
 	if read != 0 {
 		t.Error("the lazy format was read before the program asked")
 	}
@@ -1488,7 +1558,7 @@ func TestPasteData(t *testing.T) {
 	mu.Unlock()
 	b64 := base64.StdEncoding.EncodeToString
 	term.Feed([]byte("\x1b]5522;type=read:pw=" + pw + ":name=" + b64([]byte("Paste event")) + ";" + b64([]byte("image/jpeg text/uri-list")) + "\x1b\\"))
-	reply := conn.take(1)
+	reply := conn.take(term)
 	if read != 1 || !strings.Contains(reply, b64([]byte("JPEG"))) || !strings.Contains(reply, b64(uri)) {
 		t.Errorf("read %d times, replied %q", read, reply)
 	}
@@ -1533,7 +1603,7 @@ func TestClipboardReadAllow(t *testing.T) {
 	term.Feed([]byte("\x1b]52;c;?\x1b\\"))
 	tt.Frame()
 	want := "\x1b]52;c;" + base64.StdEncoding.EncodeToString([]byte("hello")) + "\x1b\\"
-	if got := conn.take(len(want)); got != want {
+	if got := conn.take(term); got != want {
 		t.Errorf("the program read %q, want %q", got, want)
 	}
 }
@@ -1553,7 +1623,7 @@ func TestClipboardReadDeny(t *testing.T) {
 		tt.SetClipboard("secret")
 		term.Feed([]byte("\x1b]52;c;?\x1b\\"))
 		tt.Frame()
-		if got := conn.take(1); got != "\x1b]52;c;\x1b\\" {
+		if got := conn.take(term); got != "\x1b]52;c;\x1b\\" {
 			t.Errorf("ClipboardRead %v: the program read %q", opts.ClipboardRead, got)
 		}
 		if got := tt.Clipboard(); got != "secret" {
@@ -1610,7 +1680,7 @@ func TestClipboardReadAsk(t *testing.T) {
 		if answer == 1 || answer == 0 {
 			want = "\x1b]52;c;aGVsbG8=\x1b\\"
 		}
-		if got := conn.take(len(want)); got != want {
+		if got := conn.take(term); got != want {
 			t.Errorf("answer %d: the program read %q, want %q", answer, got, want)
 		}
 		term.Close()
@@ -1642,7 +1712,7 @@ func TestClipboardReadOrder(t *testing.T) {
 	}
 	requests[0].Deny()
 	tt.Frame()
-	if got := conn.take(1); got != "\x1b]52;c;\x1b\\" {
+	if got := conn.take(term); got != "\x1b]52;c;\x1b\\" {
 		t.Errorf("the first read was answered %q", got)
 	}
 	if len(requests) != 2 || !requests[1].Primary {
@@ -1651,7 +1721,7 @@ func TestClipboardReadOrder(t *testing.T) {
 	requests[1].Allow()
 	tt.Frame()
 	want := "\x1b]52;p;aGVsbG8=\x1b\\"
-	if got := conn.take(len(want)); got != want {
+	if got := conn.take(term); got != want {
 		t.Errorf("the second read was answered %q, want %q", got, want)
 	}
 }
@@ -1671,7 +1741,7 @@ func TestClipboardReadPrompt(t *testing.T) {
 	tt.SetClipboard("hello")
 	term.Feed([]byte("\x1b]52;c;?\x1b\\"))
 	tt.Frame() // the prompt opens
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Fatalf("the prompt answered %q on its own", got)
 	}
 	if !tt.HasText("hello") {
@@ -1679,14 +1749,14 @@ func TestClipboardReadPrompt(t *testing.T) {
 	}
 	tt.Key(0, ui.KeyEnter)
 	want := "\x1b]52;c;aGVsbG8=\x1b\\"
-	if got := conn.take(len(want)); got != want {
+	if got := conn.take(term); got != want {
 		t.Errorf("Enter allowed the read: %q, want %q", got, want)
 	}
 	// Escape dismisses the alert, which denies the read.
 	term.Feed([]byte("\x1b]52;c;?\x1b\\"))
 	tt.Frame()
 	tt.Key(0, ui.KeyEscape)
-	if got := conn.take(1); got != "\x1b]52;c;\x1b\\" {
+	if got := conn.take(term); got != "\x1b]52;c;\x1b\\" {
 		t.Errorf("Escape answered %q, want an empty clipboard", got)
 	}
 }
@@ -1715,7 +1785,7 @@ func TestClipboardReadKitty(t *testing.T) {
 				"\x1b]5522;type=read:status=DATA:mime=" + mime + ";aGVsbG8=\x1b\\" +
 				"\x1b]5522;type=read:status=DONE\x1b\\"
 		}
-		if got := conn.take(len(want)); got != want {
+		if got := conn.take(term); got != want {
 			t.Errorf("ClipboardRead %v: the program read %q, want %q", policy, got, want)
 		}
 		term.Close()

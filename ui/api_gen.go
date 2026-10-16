@@ -2018,8 +2018,9 @@ func Spinner(c *Context) Element {
 // Split lays out first and second side by side, with a divider between
 // them that the user drags to resize them, or moves with the arrows once
 // it has the keyboard focus: *size is the width of first, which the
-// divider keeps 40 DIPs from either edge. Changed reports a move. Right to
-// left (Direction), first is on the right.
+// divider keeps 40 DIPs from either edge. With less room than that, first
+// gives way, keeping *size for when there is room again. Changed reports a
+// move. Right to left (Direction), first is on the right.
 //
 //	ui.Split(c, &app.sidebar, app.files, app.editor).Fill()
 func Split(c *Context, size *float32, first func(), second func()) Element {
@@ -2033,6 +2034,22 @@ func Split(c *Context, size *float32, first func(), second func()) Element {
 	return wrapElement(_e)
 }
 
+// SplitPercent is Split with *p the percentage of the room first takes,
+// from 0 to 100, so that both panes grow and shrink with the room, in
+// proportion.
+//
+//	ui.SplitPercent(c, &app.sidebarPercent, app.files, app.editor).Fill()
+func SplitPercent(c *Context, p *float32, first func(), second func()) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	_ctx.rt.beginBuild()
+	_e := coreSplitPercent(_ctx, p, first, second)
+	_ctx.rt.endBuild()
+	return wrapElement(_e)
+}
+
 // SplitVertical is Split with first above second, *size its height.
 func SplitVertical(c *Context, size *float32, first func(), second func()) Element {
 	_ctx := c.build()
@@ -2041,6 +2058,18 @@ func SplitVertical(c *Context, size *float32, first func(), second func()) Eleme
 	}
 	_ctx.rt.beginBuild()
 	_e := coreSplitVertical(_ctx, size, first, second)
+	_ctx.rt.endBuild()
+	return wrapElement(_e)
+}
+
+// SplitVerticalPercent is SplitPercent with first above second.
+func SplitVerticalPercent(c *Context, p *float32, first func(), second func()) Element {
+	_ctx := c.build()
+	if _ctx == nil {
+		return Element{}
+	}
+	_ctx.rt.beginBuild()
+	_e := coreSplitVerticalPercent(_ctx, p, first, second)
 	_ctx.rt.endBuild()
 	return wrapElement(_e)
 }
@@ -2921,6 +2950,22 @@ func (_handle Element) BasisPercent(p float32) Element {
 	return wrapElement(_node.BasisPercent(p))
 }
 
+// Blur blurs the element, with its children, by sigma DIPs, the standard
+// deviation of a Gaussian, as CSS's filter: blur() does: what it draws
+// spreads that far around, transparent beyond, on the GPU. It renders
+// into a bitmap first, as Effect does, about 3 sigma larger each way, and
+// an element with an Effect draws through it instead. Hit testing, focus
+// and accessibility do not change: only what shows.
+func (_handle Element) Blur(sigma float32) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Blur(sigma))
+}
+
 // Bold sets a bold font weight.
 func (_handle Element) Bold() Element {
 	_node := _handle.node()
@@ -2956,6 +3001,21 @@ func (_handle Element) BorderColor(c Color) Element {
 	return wrapElement(_node.BorderColor(c))
 }
 
+// BorderConicGradient paints the element's border (Border, BorderWidth)
+// with a conic gradient around the element, in place of its color: a ring
+// of colors, as SwiftUI's strokeBorder with an AngularGradient draws.
+//
+//	ui.Box(c).Size(120, 80).Radius(16).Border(4, ui.Color{}).BorderConicGradient(ui.ConicGradient{Stops: rainbow})
+func (_handle Element) BorderConicGradient(g ConicGradient) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.BorderConicGradient(g))
+}
+
 func (_handle Element) BorderEndWidth(v float32) Element {
 	_node := _handle.node()
 	if _node == nil {
@@ -2964,6 +3024,18 @@ func (_handle Element) BorderEndWidth(v float32) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.BorderEndWidth(v))
+}
+
+// BorderLinearGradient paints the element's border (Border, BorderWidth)
+// with a linear gradient across the element, in place of its color.
+func (_handle Element) BorderLinearGradient(g LinearGradient) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.BorderLinearGradient(g))
 }
 
 // BorderStartWidth and BorderEndWidth set the width of the border on the
@@ -3217,6 +3289,22 @@ func (_handle Element) Composing() bool {
 	_ctx := _node.c
 	_ = _ctx
 	return _node.Composing()
+}
+
+// ConicGradient fills the element with a conic gradient, its colors
+// turning around a point (CSS's conic-gradient()):
+//
+//	ui.Box(c).Size(80, 80).Radius(40).ConicGradient(ui.ConicGradient{
+//		Stops: []ui.GradientStop{{red, 0}, {yellow, 1.0 / 3}, {blue, 2.0 / 3}, {red, 1}},
+//	})
+func (_handle Element) ConicGradient(g ConicGradient) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.ConicGradient(g))
 }
 
 // ContentTransition animates the element's content as it changes, as t
@@ -3617,6 +3705,31 @@ func (_handle Element) DroppedFiles() []string {
 	_ctx := _node.c
 	_ = _ctx
 	return _node.DroppedFiles()
+}
+
+// Effect draws the element, with its children, through fx, an effect of
+// package ui/shader, in place of drawing it as it is; nil draws it as it
+// is:
+//
+//	ui.Text(c, "Wavy").Effect(wave.Effect(shader.Options{
+//		Uniforms:        map[string]any{"Time": t},
+//		MaxSampleOffset: ui.Point{Y: 8},
+//	}))
+//
+// What the element renders, with its children, shadows and what its Draw
+// callbacks paint, renders into a bitmap of the GPU, the size of its box
+// and the effect's margin (Effect.EffectMargin) around it, every frame
+// the element paints, which the effect then draws over the box and the
+// margin, transformed, clipped and faded as the element would be. Web views
+// inside the element do not show through an effect.
+func (_handle Element) Effect(fx Effect) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.Effect(fx))
 }
 
 // Ellipsis sets what ends text that MaxLines or SingleLine cuts, "…" by
@@ -5459,6 +5572,19 @@ func (_handle Element) TextAlign(a Align) Element {
 	_ctx := _node.c
 	_ = _ctx
 	return wrapElement(_node.TextAlign(a))
+}
+
+// TextAnchorCaret returns the selection of a text input as offsets in runes
+// into its text, from where it was started to its caret: the anchor is after
+// the caret when the selection was made backwards.
+func (_handle Element) TextAnchorCaret() (int, int) {
+	_node := _handle.node()
+	if _node == nil {
+		return 0, 0
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return _node.TextAnchorCaret()
 }
 
 // TextBackground fills the lines of text behind it with c, as a

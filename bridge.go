@@ -127,6 +127,10 @@ const (
 	evalBody = "try{return JSON.stringify({ok:true,v:await(async()=>{\n%s\n})()})}catch(e){return JSON.stringify({ok:false,e:String(e&&e.message||e)})}"
 )
 
+// evalCanceled, a hook of tests, runs after eval delivered the
+// cancellation of its context.
+var evalCanceled func()
+
 // eval returns the JSON result of code, which shares the memory of the
 // page's answer.
 func (w *Window) eval(ctx context.Context, code string) (jsontext.Value, error) {
@@ -140,7 +144,12 @@ func (w *Window) eval(ctx context.Context, code string) (jsontext.Value, error) 
 	// Both the cancellation and the page may answer; the first one counts
 	// and the other must not block.
 	ch := make(chan result, 2)
-	stop := context.AfterFunc(ctx, func() { deliver(ch, result{err: ctx.Err()}) })
+	stop := context.AfterFunc(ctx, func() {
+		deliver(ch, result{err: ctx.Err()})
+		if evalCanceled != nil {
+			evalCanceled()
+		}
+	})
 	defer stop()
 
 	ran := false

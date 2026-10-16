@@ -56,8 +56,8 @@ const features = [
 ]
 
 const kinds = [
-  { id: "web", label: "Web frontend" },
   { id: "native", label: "Native UI" },
+  { id: "web", label: "Web frontend" },
 ] as const
 
 type Kind = (typeof kinds)[number]["id"]
@@ -68,7 +68,7 @@ const magicMove = { duration: 600, stagger: 0, containerStyle: false, animateCon
 
 function Home() {
   const { main, ts } = Route.useLoaderData()
-  const [kind, setKind] = React.useState<Kind>("web")
+  const [kind, setKind] = React.useState<Kind>("native")
   // The code appears as it is, and only moves once the reader switches,
   // unless they asked for less motion.
   const [animate, setAnimate] = React.useState(false)

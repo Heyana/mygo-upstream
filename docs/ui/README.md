@@ -91,6 +91,8 @@ UI as they read other apps (see [Accessibility](accessibility.md)).
   strings.
 - [Drawing and animation](drawing.md): painting on elements, shaping text,
   and values that ease to their targets.
+- [Shaders](shaders.md): pixels computed on the GPU by shaders written in
+  Go's syntax, with values and images the app passes them.
 - [Transitions](transitions.md): elements that move, resize and recolor
   smoothly as the layout changes, and come and go.
 - [Startup](startup.md): a custom startup view, first-frame presentation,

@@ -142,7 +142,7 @@ func TestCommandClickWrappedLinksAndMouseTracking(t *testing.T) {
 	if len(opened) != 1 || opened[0].URL != url {
 		t.Fatalf("wrapped URL = %+v", opened)
 	}
-	if sent := conn.take(0); sent != "" {
+	if sent := conn.take(term); sent != "" {
 		t.Fatalf("Command click reached program: %q", sent)
 	}
 	if tt.Clipboard() != "keep clipboard" {
@@ -162,7 +162,7 @@ func TestCommandClickWrappedLinksAndMouseTracking(t *testing.T) {
 	// Ordinary pointer clicks still reach mouse-aware terminal programs.
 	x, y = point(1, 0)
 	tt.ClickAt(x, y)
-	if sent := conn.take(1); !strings.Contains(sent, "\x1b[<0;") {
+	if sent := conn.take(term); !strings.Contains(sent, "\x1b[<0;") {
 		t.Fatalf("normal mouse reporting broken: %q", sent)
 	}
 	// OSC 8 display labels retain their URL rather than becoming file paths.

@@ -551,3 +551,26 @@ func TestCullDoesNotPlanSpriteOnlyScenes(t *testing.T) {
 		t.Fatal("sprite frame retained the previous culling plan")
 	}
 }
+
+// A shader's effect draws with its wide uniforms for a wide gamut, and
+// with its own otherwise.
+func TestShaderWideUniforms(t *testing.T) {
+	fx := &scene.Effect{Name: "shader", Shader: &scene.ShaderLayout{Lanes: []int32{0}, Size: 16}}
+	narrow, wide := []uint32{1}, []uint32{2}
+	s := &scene.Scene{Width: 40, Height: 40,
+		Ops:     []scene.Op{{Kind: scene.OpEffect, Rect: scene.Rect{W: 20, H: 20}}},
+		Effects: []scene.EffectOp{{Effect: fx, Uniforms: narrow, WideUniforms: wide}}}
+	for _, w := range []bool{false, true} {
+		var b Builder
+		b.Wide = w
+		b.Build(s, func(*scene.Image) uintptr { return 1 })
+		want := narrow
+		if w {
+			want = wide
+		}
+		if len(b.Batches) != 1 || &b.Batches[0].Uniforms[0] != &want[0] {
+			t.Errorf("wide %v: the batch draws with %v, want %v", w, b.Batches[0].Uniforms, want)
+		}
+		b.Release()
+	}
+}

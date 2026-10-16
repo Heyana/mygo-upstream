@@ -235,7 +235,7 @@ func (ed *editor) init(buf *Buffer, o options, t *ui.Theme) {
 	if ed.sels == nil {
 		ed.sels = []sel{{goal: -1, id: 0}}
 		ed.nextID = 1
-		ed.blinkStart = time.Now()
+		ed.blinkStart = ed.frameNow
 		ed.hover.asked = -1
 		ed.hoverLine = -1
 	}
@@ -386,7 +386,7 @@ func (ed *editor) setSels(sels []sel, reveal reveal) {
 	if reveal != revealNone {
 		ed.reveal = max(ed.reveal, reveal)
 	}
-	ed.blinkStart = time.Now()
+	ed.blinkStart = ed.frameNow
 	ed.autoclosed = ed.autoclosed[:0]
 	// What select next, add cursor and select larger go on from.
 	ed.wholeWord = false

@@ -128,6 +128,9 @@ type windowHost struct {
 	lastFrame time.Time
 	// framing tells that the surface asked for the frame being drawn.
 	framing bool
+	// told is what accelerated last told the frame being painted, asked
+	// that it did.
+	told, asked bool
 	// path is how the last frame was drawn, for MYGO_FRAME_STATS.
 	path string
 	// wide tells that the GPU renderer draws the colors of scenes outside
@@ -138,7 +141,9 @@ type windowHost struct {
 	idleTimer *time.Timer
 	idleAt    time.Time
 	idleArmed bool
-	detached  bool
+	// afterT and repaintT are the timers of After and Painter.After.
+	afterT, repaintT *time.Timer
+	detached         bool
 	// shown tells that a frame was presented, which makes the window
 	// ready to show.
 	shown                               bool
@@ -272,6 +277,7 @@ func (h *windowHost) size() (float32, float32, float32) {
 
 func (h *windowHost) present(s *scene.Scene) {
 	h.last, h.path = s, ""
+	defer h.recheck()
 	if s.Width <= 0 || s.Height <= 0 {
 		return
 	}
@@ -467,6 +473,27 @@ func (h *windowHost) makeGPU() {
 	h.wide = false // the renderer draws sRGB until told otherwise
 }
 
+// accelerated reports whether the frame draws on a GPU (Painter.Accelerated).
+// The first frame makes its GPU renderer as it paints rather than as it
+// presents, to tell.
+func (h *windowHost) accelerated() bool {
+	if h.framing && !h.gpuTried {
+		h.makeGPU()
+	}
+	h.told, h.asked = h.gpu != nil && !software(h.gpu), true
+	return h.told
+}
+
+// recheck paints the window again when the frame presented draws on a GPU
+// and accelerated told its painters otherwise, or the other way round: the
+// GPU went away or came back as it presented.
+func (h *windowHost) recheck() {
+	if h.asked && h.told != (h.gpu != nil && !software(h.gpu)) && h.conn.Invalidate != nil {
+		h.invalidate()
+	}
+	h.asked = false
+}
+
 // software reports whether a renderer draws on the CPU, as Direct3D's WARP.
 func software(r gpuRenderer) bool {
 	s, ok := r.(interface{ Software() bool })
@@ -523,6 +550,34 @@ func (h *windowHost) detach() {
 }
 
 func (h *windowHost) requestFrame() { h.conn.Surface.RequestFrame() }
+
+func (h *windowHost) afterTimer(at time.Time) {
+	switch {
+	case at.IsZero():
+		if h.afterT != nil {
+			h.afterT.Stop()
+		}
+	case h.afterT != nil:
+		h.afterT.Reset(max(time.Until(at), time.Millisecond))
+	default:
+		h.afterT = time.AfterFunc(max(time.Until(at), time.Millisecond), h.invalidate)
+	}
+}
+
+func (h *windowHost) repaintTimer(at time.Time) {
+	if at.IsZero() {
+		if h.repaintT != nil {
+			h.repaintT.Stop()
+		}
+		return
+	}
+	d := max(time.Until(at), time.Millisecond)
+	if h.repaintT == nil {
+		h.repaintT = time.AfterFunc(d, func() { h.post(h.rt.repaintNow) })
+	} else {
+		h.repaintT.Reset(d)
+	}
+}
 
 func (h *windowHost) startDataDrag(data transfer.Data, local any, options transfer.DragOptions, x, y float32) error {
 	return h.conn.StartDataDrag(data, local, options, float64(x), float64(y))

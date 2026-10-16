@@ -30,7 +30,9 @@ func (t *Terminal) Paste(text string) {
 // protocol, as programs that take images do) is offered d's formats as
 // MIME types (a file list as text/uri-list) and reads those it wants,
 // even over SSH; any other gets d's text (transfer.Text), bracketed when
-// it asks (mode 2004), and nothing when there is none.
+// it asks (mode 2004). With no text but other formats, as only an image,
+// a program that asks for bracketed pastes gets an empty one, as VS
+// Code's terminal sends, and any other nothing.
 //
 // The terminal keeps a snapshot of d until the program reads it or
 // another paste comes, and answers only that read: other terminals showing
@@ -117,11 +119,20 @@ func (t *Terminal) pasteData(d transfer.Data, held []transfer.Format) {
 		status = PasteOffered
 	} else {
 		text, _ := o.data.Read(transfer.Text)
-		if len(text) == 0 && slices.ContainsFunc(held, func(f transfer.Format) bool { return f != transfer.Text }) {
+		bracketed := t.term.Mode(vt.ModeBracketedPaste)
+		switch {
+		case len(text) > 0:
+			pasted = string(text)
+			data = vt.EncodePaste(pasted, bracketed)
+		case !slices.ContainsFunc(held, func(f transfer.Format) bool { return f != transfer.Text }):
+		case bracketed:
+			// An empty bracketed paste, as VS Code's terminal sends, which
+			// programs that take images, as Claude Code, read as a paste
+			// of what the clipboard holds and read it themselves.
+			data = []byte("\x1b[200~\x1b[201~")
+		default:
 			status = PasteNoText
 		}
-		pasted = string(text)
-		data = vt.EncodePaste(pasted, t.term.Mode(vt.ModeBracketedPaste))
 	}
 	t.term.ScrollToBottom()
 	t.mu.Unlock()

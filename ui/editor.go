@@ -97,6 +97,8 @@ type editor struct {
 	hasDesired       bool
 	undo, redo       []undoStep
 	lastEdit         time.Time
+	// now is the time, the engine's (engine.now), for what depends on it.
+	now func() time.Time
 	coalesce         bool
 	dragging         bool
 	dragUnit         int // 1 rune, 2 word, 3 line
@@ -105,7 +107,7 @@ type editor struct {
 	contentW         float32
 }
 
-func newEditor() *editor { return &editor{} }
+func newEditor(now func() time.Time) *editor { return &editor{now: now} }
 
 func (ed *editor) String() string { return ed.buf.string() }
 

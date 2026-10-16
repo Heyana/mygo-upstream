@@ -446,6 +446,7 @@ func (st *viewState) link(c *ui.Context, in *parser.Inline, children func()) {
 	default:
 		l = ui.Link(c, "", "")
 	}
+	l.TextColor(st.th.Link)
 	l.Children(children)
 	switch {
 	case in.Title != "":

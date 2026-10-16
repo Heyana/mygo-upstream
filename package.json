@@ -10,7 +10,7 @@
     "website"
   ],
   "scripts": {
-    "build": "bun run --filter './packages/*' --filter './plugins/*' build",
+    "build": "bun run --filter './packages/*' build && bun run --filter './plugins/*' build",
     "test": "bun test packages plugins scripts",
     "typecheck": "tsc --noEmit"
   },

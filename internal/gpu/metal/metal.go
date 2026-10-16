@@ -48,6 +48,22 @@ func EffectSource(src string) string {
 	return "#define EFFECT\n" + shaderSource + "\n" + head + "\n" + src + "\n" + tail
 }
 
+// shaderEffectSource is the tail of a shader's library (see
+// ShaderSource).
+//
+//go:embed shadereffect.metal
+var shaderEffectSource string
+
+// ShaderSource returns the source of the library of a shader of package
+// ui/shader, whose code src ends with shaderMain: as an effect's, with a
+// tail of its own (shader_ps), which reads the shader's uniforms and
+// images. The shader's effect holds it whole (scene.Effect's Metal), so
+// that apps drawing no shader do not carry the tail.
+func ShaderSource(src string) string {
+	head, _, _ := strings.Cut(effectSource, "\n// effect\n")
+	return "#define EFFECT\n" + shaderSource + "\n" + head + "\n" + src + "\n" + shaderEffectSource
+}
+
 type id = uintptr
 
 // Metal and Core Graphics structs passed by value.
@@ -66,6 +82,7 @@ const (
 	// pixelFormatRGBA16Float holds the components of wide colors, which
 	// leave 0 to 1.
 	pixelFormatRGBA16Float = 115
+	pixelFormatRGBA32Float = 125
 
 	usageShaderRead   = 1
 	usageRenderTarget = 4
@@ -306,15 +323,19 @@ type texture struct {
 // frame: a frame's, and each canvas's.
 type drawState struct {
 	b gpu.Builder
-	// Each frame slot owns its instances, including those of canvases.
+	// Each frame slot owns its instances, including those of canvases,
+	// and the texture of the stops of its gradients (gpu.Builder.Stops).
 	instBufs [ringSize]id
 	instCaps [ringSize]int
+	stops    [ringSize]texture
 }
 
 func (d *drawState) release() {
 	for i := range d.instBufs {
 		release(&d.instBufs[i])
 		d.instCaps[i] = 0
+		release(&d.stops[i].tex)
+		d.stops[i] = texture{}
 	}
 	d.b.Release()
 }
@@ -348,6 +369,8 @@ type formatState struct {
 type Renderer struct {
 	presentationHook       func(uintptr)
 	device, queue, sampler id
+	// shaderBytes holds the uniforms of the shader being drawn, laid out.
+	shaderBytes []byte
 	// lib is the library of the shader, which the pipelines of the classes
 	// of batches are made from as they are first used.
 	lib id
@@ -388,6 +411,14 @@ type Renderer struct {
 	images map[uint64]*texture
 	// canvases are the textures canvases are drawn into.
 	canvases map[uint64]*canvasTexture
+	// blurred are the textures of the images the frame draws blurred
+	// (gpu.Builder.BlurredImage), the first used of them, and blurTmp the
+	// textures their passes go through; stopsTex is the texture of the
+	// stops of the scene drawn.
+	blurred  []texture
+	used     int
+	blurTmp  [2]texture
+	stopsTex id
 	frame    uint64
 	// Command buffers retain every resource used by their frame slot.
 	inflight    [ringSize]id
@@ -738,9 +769,23 @@ func (r *Renderer) effectPipeline(e *scene.Effect) id {
 		f.effects = map[*scene.Effect]*effectPipe{}
 	}
 	f.effects[e] = p
-	src := EffectSource(e.Metal.Source)
+	src, fn := EffectSource(e.Metal.Source), "effect_ps"
+	if e.Shader != nil {
+		src, fn = e.Metal.Source, "shader_ps" // ShaderSource's
+	}
 	var lib id
-	if len(e.Metal.Compiled) > 0 && e.Metal.Sum == gpu.SourceSum(src) {
+	if e.Shader != nil {
+		// Made as the shader compiled (PrecompileShader).
+		if shared, pipe, ok := sharedShader(r.device, src, f.format); ok {
+			if pipe != 0 {
+				release(&shared)
+				p.pipe = pipe
+				return p.pipe
+			}
+			lib = shared
+		}
+	}
+	if lib == 0 && len(e.Metal.Compiled) > 0 && e.Metal.Sum == gpu.SourceSum(src) {
 		lib = r.libraryFromData(e.Metal.Compiled)
 	}
 	if lib == 0 {
@@ -750,7 +795,7 @@ func (r *Renderer) effectPipeline(e *scene.Effect) id {
 		}
 	}
 	if lib != 0 {
-		p.pipe, p.err = r.newPipeline(lib, "effect_ps", f.format, blendOver)
+		p.pipe, p.err = r.newPipeline(lib, fn, f.format, blendOver)
 		release(&lib)
 	}
 	if p.err != nil && r.err == nil {
@@ -962,6 +1007,7 @@ func (r *Renderer) encode(s *scene.Scene, target id) (id, error) {
 		return 0, err
 	}
 	r.pipes.fallbacks = 0
+	r.used = 0
 	cb := send(r.queue, "commandBuffer")
 	if !r.checked {
 		if err := need(cb, "command buffer", "renderCommandEncoderWithDescriptor:", "commit", "presentDrawable:", "waitUntilScheduled", "waitUntilCompleted", "status", "blitCommandEncoder"); err != nil {
@@ -1033,7 +1079,12 @@ func (r *Renderer) drawCanvas(cb id, c *scene.Image) error {
 // drawInto encodes drawing s into target with d, in the format r.cur is.
 func (r *Renderer) drawInto(cb id, s *scene.Scene, target id, d *drawState) error {
 	d.b.ClipSkip = true
+	d.b.BlurredImage = func(img *scene.Image, bk scene.Backdrop) uintptr { return r.blurImage(cb, img, bk) }
 	s = d.b.Build(s, r.imageTexture)
+	d.b.BlurredImage = nil
+	if err := r.syncStops(d); err != nil {
+		return err
+	}
 	instBuf := &d.instBufs[r.inUse]
 	instCap := &d.instCaps[r.inUse]
 	if n := len(d.b.Instances); n > *instCap {
@@ -1099,6 +1150,9 @@ func (r *Renderer) drawInto(cb id, s *scene.Scene, target id, d *drawState) erro
 			send(enc, "setFragmentTexture:atIndex:", bound, 2)
 		}
 		send(enc, "setFragmentTexture:atIndex:", or(id(b.ClipMask), r.empty), 4)
+		if b.Shader != nil {
+			r.bindShader(enc, b)
+		}
 		offset := uintptr(b.Start * gpu.InstanceSize)
 		send(enc, "setVertexBuffer:offset:atIndex:", *instBuf, offset, 0)
 		send(enc, "setFragmentBuffer:offset:atIndex:", *instBuf, offset, 0)
@@ -1107,6 +1161,30 @@ func (r *Renderer) drawInto(cb id, s *scene.Scene, target id, d *drawState) erro
 	}
 	send(enc, "endEncoding")
 	return nil
+}
+
+// maxBytes is the most setFragmentBytes takes; larger uniforms go in a
+// buffer of their own.
+const maxBytes = 4096
+
+// bindShader binds what the shader of batch b reads: its uniforms, laid
+// out as its effect says, in buffer 2, and its images in textures 5 to 8.
+func (r *Renderer) bindShader(enc id, b gpu.Batch) {
+	r.shaderBytes = b.Effect.Shader.Pack(r.shaderBytes, b.Uniforms)
+	if n := len(r.shaderBytes); n > 0 && n <= maxBytes {
+		send(enc, "setFragmentBytes:length:atIndex:", uintptr(unsafe.Pointer(&r.shaderBytes[0])), uintptr(n), 2)
+	} else if n > 0 {
+		buf := send(r.device, "newBufferWithBytes:length:options:", uintptr(unsafe.Pointer(&r.shaderBytes[0])), uintptr(n), 0)
+		send(enc, "setFragmentBuffer:offset:atIndex:", buf, 0, 2)
+		release(&buf) // the encoder keeps it
+	}
+	for i, t := range b.Textures {
+		if i == gpu.BackdropImage && b.Backdrop != 0 {
+			// A shader reading its backdrop reads it as this image.
+			t = uintptr(r.cur.backdrop[0].tex)
+		}
+		send(enc, "setFragmentTexture:atIndex:", or(id(t), r.empty), uintptr(5+i))
+	}
 }
 
 // begin starts encoding the drawing of s into target, which it clears or
@@ -1145,7 +1223,90 @@ func (r *Renderer) begin(cb, target id, load uintptr, s *scene.Scene, b *gpu.Bui
 	send(enc, "setFragmentTexture:atIndex:", or(r.color.tex, r.empty), 1)
 	send(enc, "setFragmentTexture:atIndex:", r.empty, 2)
 	send(enc, "setFragmentTexture:atIndex:", r.empty, 3)
+	send(enc, "setFragmentTexture:atIndex:", or(r.stopsTex, r.empty), 9)
 	return enc, nil
+}
+
+// syncStops uploads the stops of the gradients d's builder built into the
+// texture of the frame's slot, which r.stopsTex then is, or 0 for none.
+func (r *Renderer) syncStops(d *drawState) error {
+	r.stopsTex = 0
+	w, h := d.b.StopsSize()
+	if w == 0 {
+		return nil
+	}
+	t := &d.stops[r.inUse]
+	if t.tex == 0 || t.w != w || t.h < h {
+		release(&t.tex)
+		if t.tex = r.newTexture(w, h, pixelFormatRGBA32Float, usageShaderRead, nil, 0); t.tex == 0 {
+			*t = texture{}
+			return errors.New("metal: cannot create the texture of the stops of gradients")
+		}
+		t.w, t.h = w, h
+	}
+	// The slot's last frame, which read it, is done (waitSlot).
+	data := d.b.Stops
+	for len(data) < 4*w*h {
+		data = append(data, 0)
+	}
+	d.b.Stops = data[:len(d.b.Stops)]
+	msgReplaceRegion(t.tex, sel("replaceRegion:mipmapLevel:withBytes:bytesPerRow:"), mtlRegion{W: uint(w), H: uint(h), D: 1}, 0, unsafe.Pointer(&data[0]), uint(w*16))
+	r.stopsTex = t.tex
+	return nil
+}
+
+// blurImage encodes into cb the passes blurring the area of img that bk
+// says (gpu.Builder.BlurredImage) into a texture of the frame's own, in
+// BGRA8 whatever the frame's format, as internal/raster computes them,
+// and returns it, or 0.
+func (r *Renderer) blurImage(cb id, img *scene.Image, bk scene.Backdrop) uintptr {
+	src := id(r.imageTexture(img))
+	w, h := bk.Size()
+	f := &r.formats[0]
+	if src == 0 || w <= 0 || h <= 0 {
+		return 0
+	}
+	if f.downPipe == 0 {
+		if err := r.makePipelines(f); err != nil {
+			return 0
+		}
+	}
+	for i := range r.blurTmp {
+		t := &r.blurTmp[i]
+		if t.w < w || t.h < h {
+			release(&t.tex)
+			nw, nh := max(w, t.w), max(h, t.h)
+			if t.tex = r.newTexture(nw, nh, pixelFormatBGRA8Unorm, usageRenderTarget|usageShaderRead, nil, 0); t.tex == 0 {
+				*t = texture{}
+				return 0
+			}
+			t.w, t.h = nw, nh
+		}
+	}
+	if r.used == len(r.blurred) {
+		r.blurred = append(r.blurred, texture{})
+	}
+	out := &r.blurred[r.used]
+	r.used++
+	if out.tex == 0 || out.w != w || out.h != h {
+		release(&out.tex)
+		if out.tex = r.newTexture(w, h, pixelFormatBGRA8Unorm, usageRenderTarget|usageShaderRead, nil, 0); out.tex == 0 {
+			*out = texture{}
+			return 0
+		}
+		out.w, out.h = w, h
+	}
+	p := gpu.ImageDownPass(bk)
+	if bk.Radius == 0 {
+		r.pass(cb, f.downPipe, src, out.tex, w, h, &p)
+		return uintptr(out.tex)
+	}
+	r.pass(cb, f.downPipe, src, r.blurTmp[0].tex, w, h, &p)
+	p = gpu.ImageBlurPass(bk, [2]int32{1, 0})
+	r.pass(cb, f.blurPipe, r.blurTmp[0].tex, r.blurTmp[1].tex, w, h, &p)
+	p = gpu.ImageBlurPass(bk, [2]int32{0, 1})
+	r.pass(cb, f.blurPipe, r.blurTmp[1].tex, out.tex, w, h, &p)
+	return uintptr(out.tex)
 }
 
 // readBackdrop encodes the passes computing the backdrop bk of what
@@ -1360,6 +1521,14 @@ func (r *Renderer) releaseTextures() {
 		delete(r.canvases, key)
 	}
 	r.drawState.release()
+	for i := range r.blurred {
+		release(&r.blurred[i].tex)
+	}
+	r.blurred, r.used = nil, 0
+	for i := range r.blurTmp {
+		release(&r.blurTmp[i].tex)
+		r.blurTmp[i] = texture{}
+	}
 	for i := range r.formats {
 		for j := range r.formats[i].backdrop {
 			release(&r.formats[i].backdrop[j].tex)

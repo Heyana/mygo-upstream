@@ -45,6 +45,12 @@ type ListState struct {
 	// follows its item, and the list keeps its place and its choice when
 	// rows are added or removed above them, as when older messages load.
 	Key func(row int) any
+	// KeepOffset keeps a list with a Key where it is scrolled as its rows
+	// move, rather than with the item at its top: for rows sorted again as
+	// they change, as a process monitor's, which the list would otherwise
+	// scroll along with the item at its top. The state of a row, the choice
+	// and the row Shift chooses from still follow their items.
+	KeepOffset bool
 	// FollowEnd starts the list at its end, and keeps the end in view as
 	// rows are added or grow while it shows it, as a chat or a log does:
 	// scrolling away from the end stops following it, and scrolling back
@@ -1397,7 +1403,7 @@ func (s *ListState) remember(e *node, first, last int, atEnd bool, scroll float6
 	s.anchor, s.anchorKey = max(0, first), nil
 	if n == 0 {
 		s.inset = 0
-	} else if s.Key != nil {
+	} else if s.Key != nil && !s.KeepOffset {
 		s.anchorKey = s.Key(first)
 	}
 	s.selKey, s.pivotKey = nil, nil

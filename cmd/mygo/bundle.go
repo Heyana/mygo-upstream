@@ -77,7 +77,11 @@ func bundleExecutable(app string) string {
 // app ships into the Resources of its bundle, named as Xcode names them,
 // which make AppKit say its own texts in the language and System Settings
 // list the language for the app; the InfoPlist.strings of each names the
-// app in the language where its catalog does (mygo.appName).
+// app in the language where its catalog does (mygo.appName). An
+// InfoPlist.strings the app's resources put there already is kept, and
+// the name added to it where it has none: its strings translate those of
+// Info.plist, such as the reasons the system shows as it asks for a
+// permission.
 func writeLocalizations(c *Config, resources string, langs []appLanguage) error {
 	for _, l := range langs {
 		dir := filepath.Join(resources, lprojName(l.Tag)+".lproj")
@@ -85,8 +89,22 @@ func writeLocalizations(c *Config, resources string, langs []appLanguage) error 
 			return err
 		}
 		names := map[string]any{}
+		path := filepath.Join(dir, "InfoPlist.strings")
+		if data, err := os.ReadFile(path); err == nil {
+			own, err := parseStrings(data)
+			if err != nil {
+				return fmt.Errorf("%s.lproj/InfoPlist.strings of the resources: %w", lprojName(l.Tag), err)
+			}
+			for k, v := range own {
+				names[k] = v
+			}
+		}
 		if l.Name != "" && l.Name != c.Name {
-			names["CFBundleName"], names["CFBundleDisplayName"] = l.Name, l.Name
+			for _, k := range []string{"CFBundleName", "CFBundleDisplayName"} {
+				if names[k] == nil {
+					names[k] = l.Name
+				}
+			}
 		}
 		var b bytes.Buffer
 		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>
@@ -95,7 +113,11 @@ func writeLocalizations(c *Config, resources string, langs []appLanguage) error 
 `)
 		writePlistValue(&b, names, "")
 		b.WriteString("</plist>\n")
-		if err := os.WriteFile(filepath.Join(dir, "InfoPlist.strings"), b.Bytes(), 0o644); err != nil {
+		// The copy of the resources keeps links: write a new file, not through one.
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.WriteFile(path, b.Bytes(), 0o644); err != nil {
 			return err
 		}
 	}

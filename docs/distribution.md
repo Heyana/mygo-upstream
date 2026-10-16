@@ -458,6 +458,22 @@ The app's name and description in a language are its catalog's
 `linux.comment` are those of the source language. An app without catalogs
 declares no languages.
 
+On macOS, the other strings of `Info.plist`, such as the reasons the
+system shows as it asks for the microphone or the system's audio
+(`NSMicrophoneUsageDescription`, `NSAudioCaptureUsageDescription`), are
+translated as Xcode's projects translate them: by an `InfoPlist.strings`
+of the language among the app's [resources](#platform-resources), which
+the build keeps, adding the app's name where the file has none.
+
+```
+resources/darwin/
+├── ja.lproj/InfoPlist.strings        "NSMicrophoneUsageDescription" = "音声メモを録音します。";
+└── zh-Hans.lproj/InfoPlist.strings   "NSMicrophoneUsageDescription" = "用麦克风录语音笔记。";
+```
+
+The file is the text format Xcode writes, in UTF-8 or UTF-16, or a
+property list in XML.
+
 ## URL schemes and file types
 
 `urlSchemes` and `fileAssociations` in the configuration (see

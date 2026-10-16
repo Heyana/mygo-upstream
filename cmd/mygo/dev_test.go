@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/internal/wait"
 )
 
 // TestMain lets the test binary play a development build of an app for
@@ -38,6 +40,11 @@ func TestMain(m *testing.M) {
 		}
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM)
+		if ready := os.Getenv("MYGO_FAKE_READY"); ready != "" {
+			if err := os.WriteFile(ready, nil, 0o600); err != nil {
+				os.Exit(2)
+			}
+		}
 		<-sig
 		os.Exit(0)
 	case "exit":
@@ -77,14 +84,18 @@ func TestDevLaunch(t *testing.T) {
 	s := &devSession{root: t.TempDir()}
 
 	t.Setenv("MYGO_FAKE_APP", "run")
+	ready := filepath.Join(s.root, "ready")
+	t.Setenv("MYGO_FAKE_READY", ready)
 	p, err := s.launch(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(p.stop)
+	wait.Until(t, "the build installed its signal handler", func() bool { return fileExists(ready) })
 	select {
 	case <-p.done:
 		t.Fatalf("the build exited: %v", p.err)
-	case <-time.After(200 * time.Millisecond):
+	default:
 	}
 	p.stop()
 	if p.err != nil {
@@ -101,7 +112,7 @@ func TestDevLaunch(t *testing.T) {
 		if p.err == nil || !strings.Contains(p.err.Error(), "exit status 3") {
 			t.Errorf("exit: %v", p.err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("the exit of a build went unnoticed")
 	}
 
@@ -110,11 +121,13 @@ func TestDevLaunch(t *testing.T) {
 	if p, err = s.launch(os.Args[0]); err != nil {
 		t.Fatal(err)
 	}
+	// stop returns once it has killed it, after the grace: the test's
+	// timeout is the guard against a stop that waits for it forever. The
+	// build may yet die of SIGTERM, when that comes before it ignores it.
 	stopGrace = 200 * time.Millisecond
-	start := time.Now()
 	p.stop()
-	if d := time.Since(start); d > 3*time.Second {
-		t.Errorf("a hanging build took %v to be killed", d)
+	if p.err == nil {
+		t.Error("a build killed exited cleanly")
 	}
 }
 
@@ -150,21 +163,16 @@ func TestWatcher(t *testing.T) {
 	var reported []string // the paths of the last change
 	expect := func(changed bool, what string) {
 		t.Helper()
-		wait := 300 * time.Millisecond
 		if changed {
-			// Loaded CI runners can delay polling; unchanged-input checks
-			// still need only the short window to detect spurious events.
-			wait = 3 * time.Second
+			reported = wait.For(t, what+" reported", changes)
+			return
 		}
+		// Nothing comes for a while: a busy machine may only make this
+		// miss a spurious change, never fail a right watcher.
 		select {
 		case reported = <-changes:
-			if !changed {
-				t.Fatalf("%s: change reported", what)
-			}
-		case <-time.After(wait):
-			if changed {
-				t.Fatalf("%s: change not reported", what)
-			}
+			t.Fatalf("%s: change reported", what)
+		case <-time.After(300 * time.Millisecond):
 		}
 	}
 	expect(false, "nothing")

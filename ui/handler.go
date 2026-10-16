@@ -1,5 +1,7 @@
 package ui
 
+import time "time"
+
 // InputKind is the kind of an InputEvent.
 type InputKind uint8
 
@@ -81,6 +83,9 @@ type InputEvent struct {
 	Precise bool
 	// Start and End are the runes InputSelect selects.
 	Start, End int
+	// Time is when the event came, by the clock of the window's frames
+	// (Context.Now), which a Tester's clock is in tests.
+	Time time.Time
 }
 
 // HandleInput has fn take the element's input as it comes, on the main
@@ -176,6 +181,7 @@ func (rt *engine) deliver(s *state, ev InputEvent) bool {
 		return false
 	}
 	ev.X, ev.Y = s.local(rt.pointerX, rt.pointerY)
+	ev.Time = rt.now()
 	if ev.Kind == InputScroll {
 		ev.DX, ev.DY = s.vector(rt.pointerX, rt.pointerY, ev.DX, ev.DY)
 	}

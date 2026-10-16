@@ -38,7 +38,7 @@ func TestTapLinksOpenOnRelease(t *testing.T) {
 		if !slices.Equal(tt.OpenedURLs(), []string{url}) {
 			t.Fatalf("opened links = %q", tt.OpenedURLs())
 		}
-		if tt.Clipboard() != "keep clipboard" || conn.take(0) != "" {
+		if tt.Clipboard() != "keep clipboard" || conn.take(term) != "" {
 			t.Fatal("link tap copied text or reached the remote program")
 		}
 	}

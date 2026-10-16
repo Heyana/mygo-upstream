@@ -483,6 +483,33 @@ entry. The [watch plugin](plugins/watch.md) gives
 pages watches of the directories and files an app chooses, and says how
 each platform watches.
 
+`HintsOnly` trades all of that precision for cost. The watch keeps no
+snapshot and stats no file: it reports only `mygo.FileHint` events, each
+naming a directory in or under which the system said something changed,
+and `.` after the system lost changes. Which file changed, how, and whether
+it was renamed are never known. It suits a dev reloader, which rebuilds on
+any change:
+
+```go
+w, err := mygo.WatchFiles(ctx, dir, mygo.FileWatchOptions{
+	Recursive: true,
+	HintsOnly: true, // only "something under this directory changed"
+	Ignore: func(p string, isDir bool) bool {
+		return isDir && path.Base(p) == "node_modules"
+	},
+})
+```
+
+Never use it where the file matters: following a document, syncing, or
+anything that would act on a path it can't know. With it, `Ignore` is asked
+about directories only (a change to a file it would ignore still hints at
+the file's directory), and `MaxEntries` counts the directories enrolled. On
+macOS and Windows a recursive hints-only watch enrolls only its directory,
+which the system watches whole; on Linux it enrolls every directory,
+reading their entries' types without stat'ing them. Symlinks are still not
+followed, nothing outside the directory is watched, and the watched
+directory going away still ends the watch with a `FileRemove` of `.`.
+
 ## Global shortcuts
 
 Global shortcuts work while the app is in the background, for example to

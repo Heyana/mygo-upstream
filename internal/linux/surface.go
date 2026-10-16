@@ -155,6 +155,7 @@ type surface struct {
 	// focus to a web view passes on to it (TabInto).
 	pressing     ptr
 	lastPointer  ptr
+	clicks       platform.ClickCounter
 	dragContext  ptr
 	dragRequest  *platform.DragRequest
 	dragError    error
@@ -733,7 +734,12 @@ func initSurfaceCallbacks() {
 			}
 			s.lastPointer = gdkEventCopy(event)
 		}
-		s.send(platform.SurfaceEvent{Kind: kind, X: field[float64](event, 24), Y: field[float64](event, 32), Button: button, Mods: mods})
+		x, y := field[float64](event, 24), field[float64](event, 32)
+		clicks := 0
+		if kind == platform.PointerDown {
+			clicks = s.clicks.Press(button, x, y, field[uint32](event, 20), doubleClick())
+		}
+		s.send(platform.SurfaceEvent{Kind: kind, X: x, Y: y, Button: button, Clicks: clicks, Mods: mods})
 		if kind == platform.PointerUp && button == 0 && s.dragRequest == nil && s.lastPointer != 0 {
 			gdkEventFree(s.lastPointer)
 			s.lastPointer = 0

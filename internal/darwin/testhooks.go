@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -85,7 +86,8 @@ func TestClick(handle uintptr, x, y float64) { testClick(handle, x, y, false) }
 
 // TestAppClick is TestClick through the application's event queue, where
 // event monitors see the click as they see the user's, as those of
-// transient popovers that close on clicks elsewhere.
+// transient popovers that close on clicks elsewhere. The application has
+// handled the click when it returns (handlePosted).
 func TestAppClick(handle uintptr, x, y float64) { testClick(handle, x, y, true) }
 
 // TestAppPress is half of TestAppClick: the left mouse down, or the up,
@@ -118,6 +120,52 @@ func testMouse(handle uintptr, x, y float64, viaApp bool, types ...uint) {
 			}
 		}
 	})
+	if viaApp {
+		handlePosted()
+	}
+}
+
+// testHandledSubtype marks the application-defined event handlePosted
+// posts after the events a test posted.
+const testHandledSubtype = 0x6d74 // 'mt'
+
+// testHandledMark tells handlePosted's events apart. Main thread only.
+var testHandledMark int
+
+// handlePosted handles the events posted to the application's queue, up to
+// an event it posts after them, before it returns: it takes them from the
+// queue and sends them as the run loop does, so that event monitors and
+// transient popovers see them as they see the user's. A test that posts
+// input so knows that the application handled it before it checks what
+// the input did, rather than waiting a while. It gives up after 10
+// seconds, which only a hung application would take.
+func handlePosted() {
+	testHandledMark++
+	mark := testHandledMark
+	withPool(func() {
+		ev := msgOtherEvent(class("NSEvent"), sel("otherEventWithType:location:modifierFlags:timestamp:windowNumber:context:subtype:data1:data2:"),
+			nsEventTypeApplicationDefined, NSPoint{}, 0, 0, 0, 0, testHandledSubtype, mark, 0)
+		send(theBackend.app, "postEvent:atStart:", uintptr(ev), 0)
+	})
+	mode := nsString("kCFRunLoopDefaultMode")
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		done := false
+		withPool(func() {
+			until := msgDateSince(class("NSDate"), sel("dateWithTimeIntervalSinceNow:"), 0.5)
+			ev := msgNextEvent(theBackend.app, sel("nextEventMatchingMask:untilDate:inMode:dequeue:"), ^uint64(0), until, mode, true)
+			if ev == 0 {
+				return
+			}
+			if sendInt(ev, "type") == nsEventTypeApplicationDefined && int16(sendInt(ev, "subtype")) == testHandledSubtype && sendInt(ev, "data1") == mark {
+				done = true
+				return
+			}
+			send(theBackend.app, "sendEvent:", uintptr(ev))
+		})
+		if done {
+			return
+		}
+	}
 }
 
 // TestDrag presses the primary button at the first of points, in points
@@ -444,7 +492,8 @@ func TestKey(handle uintptr, code uint16, chars string) bool {
 
 // TestAppKey posts a key down and up to the application's event queue,
 // which sends it to the key window as it does the user's keys, to a page
-// or native UI.
+// or native UI. The application has handled the key when it returns
+// (handlePosted).
 func TestAppKey(code uint16, chars string) {
 	withPool(func() {
 		number := sendInt(send(theBackend.app, "keyWindow"), "windowNumber")
@@ -455,6 +504,7 @@ func TestAppKey(code uint16, chars string) {
 			send(theBackend.app, "postEvent:atStart:", uintptr(ev), 0)
 		}
 	})
+	handlePosted()
 }
 
 // TestKeyShift is TestKey with Shift held when shift is set.

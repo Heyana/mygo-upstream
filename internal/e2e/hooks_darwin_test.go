@@ -3,13 +3,14 @@
 package e2e
 
 import (
+	"log"
 	"os/exec"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/internal/darwin"
+	"github.com/egoist/mygo/internal/wait"
 )
 
 // recentDocumentRecorded reports whether path is among the app's recent
@@ -48,28 +49,29 @@ func appClick(w *mygo.Window, x, y float64) bool {
 	return true
 }
 
-// heldAppClick is appClick with the button held down a while, as a user
-// clicks: what the press did runs before the release.
+// heldAppClick is appClick with the button held down, as a user clicks:
+// what the press did runs before the release, the work it left for the
+// main thread too.
 func heldAppClick(w *mygo.Window, x, y float64) bool {
 	waitOnScreen(w)
 	mygo.RunOnMain(func() { darwin.TestAppPress(w.NativeHandle(), x, y, true) })
-	time.Sleep(150 * time.Millisecond)
+	mygo.RunOnMain(func() {}) // after what the press posted
 	mygo.RunOnMain(func() { darwin.TestAppPress(w.NativeHandle(), x, y, false) })
 	return true
 }
 
-// waitOnScreen waits, for up to 5 seconds, for a window to show on screen,
-// as a user sees a window before clicking it: a window shows a while after
-// it is ordered front and made key, longer on a busy runner, and AppKit
-// puts a click made for it before then elsewhere in it, as outside its
-// content, where it clicks nothing.
+// waitOnScreen waits for a window to show on screen, as a user sees a
+// window before clicking it: a window shows a while after it is ordered
+// front and made key, longer on a busy runner, and AppKit puts a click
+// made for it before then elsewhere in it, as outside its content, where
+// it clicks nothing. wait.Guard is a hang guard: it says so if the window
+// did not show by then, before the click that will miss.
 func waitOnScreen(w *mygo.Window) {
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		var on bool
+	if !wait.Poll(func() (on bool) {
 		mygo.RunOnMain(func() { on = darwin.TestOnScreen(w.NativeHandle()) })
-		if on {
-			return
-		}
+		return on
+	}) {
+		log.Printf("e2e: the window %q did not show on screen in %v: a click made for it misses", w.Title(), wait.Guard)
 	}
 }
 

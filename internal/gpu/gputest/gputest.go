@@ -24,7 +24,7 @@ import (
 // gray, and effects, reading their backdrop blurred at each size or not,
 // over each other, clipped and at the frame's edge, or reading none.
 func Scene() *scene.Scene {
-	s := &scene.Scene{Width: 320, Height: 600, Clear: scene.Color{R: 246, G: 247, B: 249, A: 255},
+	s := &scene.Scene{Width: 320, Height: 740, Clear: scene.Color{R: 246, G: 247, B: 249, A: 255},
 		Text: scene.TextParams{GammaRatios: scene.GammaRatios(1.8), Contrast: 1, SubpixelContrast: 0.5}}
 	mask := scene.NewAtlas(1, 64, 64)
 	color := scene.NewAtlas(4, 64, 32)
@@ -225,6 +225,50 @@ func Scene() *scene.Scene {
 	inset(scene.Rect{X: 110.5, Y: 548.25, W: 90, H: 44}, 14, scene.Rect{X: 117.5, Y: 556.25, W: 82, H: 36}, 10, yellow, 8)
 	inset(scene.Rect{X: 210, Y: 548, W: 50, H: 44}, 12, scene.Rect{X: 216, Y: 555, W: 38, H: 30}, 6, red, 0)
 	inset(scene.Rect{X: 270, Y: 548, W: 40, H: 44}, 20, scene.Rect{}, 0, blue, 6)
+
+	// Gradients of stops: conic, in sRGB with a hard stop and in Oklab,
+	// linear, half transparent and to transparent, painting borders, plain
+	// and dashed, and glyphs; and images blurred, at full size and a
+	// quarter of it.
+	stops := func(st ...scene.Stop) [2]int32 {
+		a := int32(len(s.Stops))
+		s.Stops = append(s.Stops, st...)
+		return [2]int32{a, int32(len(s.Stops))}
+	}
+	green := scene.Color{R: 34, G: 197, B: 94, A: 255}
+	add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 10, Y: 605, W: 60, H: 60}, Radii: r4(30), Paint: scene.PaintConic,
+		Gradient: [4]float32{40, 635, 0.4, 0}, Stops: stops(scene.Stop{Color: red, At: 0}, scene.Stop{Color: yellow, At: 0.3}, scene.Stop{Color: blue, At: 0.3}, scene.Stop{Color: green, At: 0.7}, scene.Stop{Color: red, At: 1})})
+	add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 80.5, Y: 605.25, W: 60, H: 60}, Radii: r4(8), Paint: scene.PaintConicOklab,
+		Gradient: [4]float32{100, 625, -1, 0}, Stops: stops(scene.Stop{Color: blue, At: 0.1}, scene.Stop{Color: yellow, At: 0.5}, scene.Stop{Color: red, At: 0.9})})
+	add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 150, Y: 605, W: 70, H: 25}, Radii: r4(6), Paint: scene.PaintLinearStops,
+		Gradient: [4]float32{150, 605, 220, 630}, Stops: stops(scene.Stop{Color: red, At: 0.1}, scene.Stop{Color: scene.Color{R: 37, G: 99, B: 235, A: 120}, At: 0.5}, scene.Stop{Color: yellow, At: 0.9})})
+	add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 150, Y: 637, W: 70, H: 25}, Paint: scene.PaintLinearStopsOklab,
+		Gradient: [4]float32{150, 0, 220, 0}, Stops: stops(scene.Stop{Color: blue, At: 0}, scene.Stop{Color: green, At: 0.6}, scene.Stop{Color: scene.Color{}, At: 1})})
+	add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 230.5, Y: 605.25, W: 80, H: 60}, Radii: r4(14), Color: scene.Color{R: 255, G: 255, B: 255, A: 120},
+		Border: scene.Uniform(6), BorderColor: scene.Color{R: 255, G: 255, B: 255, A: 255}, BorderPaint: true, Paint: scene.PaintConicOklab,
+		Gradient: [4]float32{270, 635, 0, 0}, Stops: stops(scene.Stop{Color: red, At: 0}, scene.Stop{Color: blue, At: 0.5}, scene.Stop{Color: red, At: 1})})
+	add(scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 230, Y: 670, W: 80, H: 30}, Radii: r4(6), Border: scene.Uniform(3),
+		BorderColor: scene.Color{R: 255, G: 255, B: 255, A: 200}, BorderPaint: true, Dashed: true, Paint: scene.PaintLinearStops,
+		Gradient: [4]float32{230, 0, 310, 0}, Stops: stops(scene.Stop{Color: green, At: 0}, scene.Stop{Color: red, At: 1})})
+	start = int32(len(s.Glyphs))
+	for i := range 3 {
+		s.Glyphs = append(s.Glyphs, scene.Glyph{X: float32(10 + i*18), Y: 676, W: 16, H: 16, U: uint16(dx), V: uint16(dy), UW: 16, VH: 16, Color: ink})
+	}
+	add(scene.Op{Kind: scene.OpGlyphs, Start: start, End: int32(len(s.Glyphs)), Paint: scene.PaintConic,
+		Gradient: [4]float32{36, 684, 0, 0}, Stops: stops(scene.Stop{Color: red, At: 0}, scene.Stop{Color: blue, At: 0.5}, scene.Stop{Color: yellow, At: 1})})
+	add(scene.Op{Kind: scene.OpImage, Rect: scene.Rect{X: 70, Y: 672, W: 48, H: 48}, Image: img, Src: scene.Rect{W: 8, H: 8}, Blur: 1.2})
+	big := make([]byte, 64*64*4)
+	for y := range 64 {
+		for x := range 64 {
+			i := (y*64 + x) * 4
+			if x >= 16 && x < 48 && y >= 20 && y < 44 {
+				big[i], big[i+1], big[i+2], big[i+3] = 220, 40, 40, 255
+			} else if (x/8+y/8)%2 == 0 && x > 4 && x < 60 && y > 4 && y < 60 {
+				big[i], big[i+1], big[i+2], big[i+3] = 18, 50, 117, 128
+			}
+		}
+	}
+	add(scene.Op{Kind: scene.OpImage, Rect: scene.Rect{X: 130, Y: 672, W: 64, H: 64}, Radii: r4(8), Image: scene.NewImageRGBA(64, 64, big), Src: scene.Rect{W: 64, H: 64}, Blur: 12})
 	return s
 }
 
@@ -660,4 +704,20 @@ func WideScene() *scene.Scene {
 		scene.Op{Kind: scene.OpFill, Rect: scene.Rect{X: 70, Y: 200, W: 380, H: 100}, Color: red, Wide: 1},
 		scene.Op{Kind: scene.OpPopClip})
 	return s
+}
+
+// WithoutNewPaints returns s without what shaders older than gradients of
+// stops draw differently: ops painting with stops (scene.Stop), borders
+// painted with a gradient (Op.BorderPaint) and images blurred, for tests
+// that compare a renderer with an earlier copy of its shader.
+func WithoutNewPaints(s *scene.Scene) *scene.Scene {
+	out := *s
+	out.Ops = nil
+	for _, op := range s.Ops {
+		if op.Paint.HasStops() || op.BorderPaint || op.Kind == scene.OpImage && op.Blur > 0 {
+			continue
+		}
+		out.Ops = append(out.Ops, op)
+	}
+	return &out
 }

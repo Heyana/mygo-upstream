@@ -91,7 +91,10 @@ The terminal does what terminal apps do:
   wants, even over SSH. Only the terminal that pasted answers its read,
   with what the clipboard held at the paste; other terminals showing the
   same program, as other windows on a session, stay silent. Other
-  programs get the text alone, and an image alone pastes nothing.
+  programs get the text alone. An image alone pastes an empty bracketed
+  paste to a program that asks for bracketed pastes, as VS Code's
+  terminal does, which agents such as Claude Code take as their cue to
+  read the image from the clipboard themselves; to any other, nothing.
 - **Reading the clipboard**: a program asks with OSC 52 (`?`) or OSC 5522
   and is refused by default, with an empty clipboard for OSC 52 and an
   EPERM status for OSC 5522; `ClipboardRead` allows it or asks the app
@@ -158,9 +161,10 @@ term, err := terminal.New(terminal.Options{
 - `OptionAsAlt` makes Option on macOS the Alt key of programs (Meta),
   instead of the key typing accented letters.
 - `CopyOnSelect: terminal.CopyOnSelectClipboard` copies the selection to
-  the clipboard as the pointer ends it, as Ghostty's
-  `copy-on-select = clipboard`. Ghostty's `primary`, Linux's selection
-  clipboard, is not there, as native UI has none.
+  the clipboard as the pointer ends it, and as Select All makes it, as
+  Ghostty's `copy-on-select = clipboard`. Ghostty's `primary`, Linux's
+  selection clipboard, is not there, as native UI has none.
+  `SetCopyOnSelect` changes it in a running terminal.
 - `Keybinds` bind keys to actions, over the defaults (see [Keys](#keys)).
 - `RightClick` is what a secondary click does, as Ghostty's
   `right-click-action`: the context menu by default,
@@ -247,8 +251,8 @@ term, err := terminal.New(terminal.Options{
   then `PasteSent`; or `PasteNotTaken` when the program has not read it 5
   seconds after the offer was written (it may still, until another paste
   comes), or `PasteNoText` when a paste with no text, as only an image,
-  goes to a program that does not read the clipboard, which pastes
-  nothing. An app shows a large image's progress over a slow link this
+  goes to a program that reads neither the clipboard nor bracketed
+  pastes, which pastes nothing. An app shows a large image's progress over a slow link this
   way, and says why nothing pasted.
 - `OnKey` sees a key press on the main thread before the keybinds and
   before the terminal sends it, and takes it by returning true: neither the key nor the text it

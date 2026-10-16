@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"log"
 	"slices"
 	"strings"
 	"testing"
@@ -37,9 +38,14 @@ func click(w *mygo.Window, x, y float64) (ok bool) {
 	return ok
 }
 
-// appClick clicks with the system's input, which activates windows.
+// appClick clicks with the system's input, which activates windows, and
+// returns once the app handled the click.
 func appClick(w *mygo.Window, x, y float64) (ok bool) {
-	mygo.RunOnMain(func() { ok = win.TestInputClick(w.NativeHandle(), x, y) })
+	var missed string
+	mygo.RunOnMain(func() { ok, missed = win.TestInputClick(w.NativeHandle(), x, y) })
+	if missed != "" {
+		log.Printf("e2e: the click at (%v, %v) did not reach the app; the window there: %s", x, y, missed)
+	}
 	return ok
 }
 

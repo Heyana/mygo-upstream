@@ -798,7 +798,7 @@ func (r *Router) focusPage(c *context, page *node, cur *routeEntry) {
 	}
 	if s := rt.states[cur.focus]; cur.focus != 0 && s != nil && s.seen == rt.frame && s.pass == rt.pass {
 		rt.focused = cur.focus
-		rt.blinkStart = time.Now()
+		rt.blinkStart = rt.now()
 		return
 	}
 	page.Focus()

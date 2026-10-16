@@ -240,6 +240,13 @@ type Document struct {
 	// revs counts the inlines parsed, to give each a Revision of its own.
 	revs uint32
 	inp  inlineParser
+	// steps counts the work parsing does beyond reading the source once:
+	// the bytes scanned ahead or back, and the delimiters, brackets, nodes
+	// and lines walked, as the loops that could take quadratic time do it.
+	// Tests check that it grows linearly with the source.
+	steps int
+	// marks is the buffer of the last sourceMap.
+	marks []int
 }
 
 type oldInline struct {
@@ -283,6 +290,7 @@ func Parse(src string) *Document {
 // New returns an empty document reading ext.
 func New(ext Extensions) *Document {
 	d := &Document{ext: ext, healedAt: -1}
+	d.inp.d = d
 	d.reset()
 	return d
 }

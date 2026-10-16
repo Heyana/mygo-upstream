@@ -70,7 +70,7 @@ func (e *node) prepareSelectable() {
 	}
 	ed := e.st.editor
 	if ed == nil {
-		ed = newEditor()
+		ed = newEditor(e.c.rt.now)
 		ed.readOnly, ed.multiline = true, true
 		e.st.editor = ed
 	}

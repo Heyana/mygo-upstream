@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo/internal/l10n"
 	"github.com/egoist/mygo/internal/platform"
@@ -330,7 +329,7 @@ func (rt *engine) menuPress(chain []uint64, x, y float32) bool {
 			rt.focused = s.id
 			rt.focusVisible = false
 		}
-		rt.blinkStart = time.Now()
+		rt.blinkStart = rt.now()
 		if ed := s.editor; ed.laidOut() {
 			lx, ly := s.local(x, y)
 			i := ed.hit(lx, ly)
@@ -468,7 +467,7 @@ func (rt *engine) menuChosen(p *shownMenu, id int) {
 			if !rt.textSelectionCommand(s, p.commands[id-1]) {
 				s.editor.queue = append(s.editor.queue, editEvent{kind: editCommand, text: p.commands[id-1]})
 			}
-			rt.blinkStart = time.Now()
+			rt.blinkStart = rt.now()
 		}
 	} else {
 		mr := &rt.menu

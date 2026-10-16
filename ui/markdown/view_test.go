@@ -148,16 +148,14 @@ func TestRevealPaces(t *testing.T) {
 	if len(first) >= len(text)-1 {
 		t.Fatalf("a burst showed at once: %d of %d bytes", len(first), len(text))
 	}
-	time.Sleep(60 * time.Millisecond)
-	tt.Frame()
+	tt.Advance(60 * time.Millisecond)
 	if second := strings.Join(tt.Texts(), ""); len(second) <= len(first) {
 		t.Fatalf("no more text after a while: %d then %d bytes", len(first), len(second))
 	}
 	done = true
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-		tt.Frame()
+	// Within two seconds of the clock.
+	for range 100 {
+		tt.Advance(20 * time.Millisecond)
 		if strings.Join(tt.Texts(), "") == strings.TrimSpace(text) {
 			return
 		}
@@ -188,6 +186,31 @@ func TestThemeOverrides(t *testing.T) {
 	got := resolve(th, def)
 	if got.Link != th.Link || got.FontSize != 20 || got.Text != def.Text || got.Headings[0].Size != def.Headings[0].Size {
 		t.Errorf("resolved %+v", got)
+	}
+}
+
+// TestThemeLink checks that links draw in Theme.Link, not the window
+// theme's accent.
+func TestThemeLink(t *testing.T) {
+	o := &Options{Theme: &Theme{Link: ui.RGB(255, 0, 0)}}
+	tt := ui.NewTester(func(c *ui.Context) { View(c, "plain [a link](https://example.com)", o) }, 300, 80)
+	img := tt.Image()
+	acc := ui.LightTheme().Accent
+	reds, accent := 0, 0
+	for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+		for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			r, g, b = r>>8, g>>8, b>>8
+			if r > 200 && g < 60 && b < 60 {
+				reds++
+			}
+			if r == uint32(acc.R) && g == uint32(acc.G) && b == uint32(acc.B) {
+				accent++
+			}
+		}
+	}
+	if reds == 0 || accent > 0 {
+		t.Errorf("%d pixels in Theme.Link, %d in the window theme's accent", reds, accent)
 	}
 }
 
@@ -232,10 +255,10 @@ func TestFadeReplayed(t *testing.T) {
 	text, done = "", false
 	tt.Frame()
 	text = src
+	tt.Frame()
 	faded := false
 	for range 20 {
-		time.Sleep(10 * time.Millisecond)
-		tt.Frame()
+		tt.Advance(10 * time.Millisecond)
 		for i := range st.paras {
 			for _, pc := range st.paras[i].p.pieces {
 				for _, s := range pc.spans {
@@ -281,18 +304,14 @@ func TestRevealBySentence(t *testing.T) {
 		}
 	}, 600, 400)
 	text = "First sentence here. Second one is still"
-	for range 10 {
-		time.Sleep(10 * time.Millisecond)
-		tt.Frame()
-	}
+	tt.Frame()
+	tt.Advance(100 * time.Millisecond)
 	if got := strings.Join(tt.Texts(), ""); got != "First sentence here." {
 		t.Errorf("streaming shows %q", got)
 	}
 	done = true
-	for range 10 {
-		time.Sleep(10 * time.Millisecond)
-		tt.Frame()
-	}
+	tt.Frame()
+	tt.Advance(100 * time.Millisecond)
 	if got := strings.Join(tt.Texts(), ""); got != text {
 		t.Errorf("done, shows %q", got)
 	}

@@ -78,17 +78,16 @@ func watchDocumentFile(ctx context.Context, path string) {
 	for _, b := range documentsAt(path) {
 		go b.checkDisk()
 	}
-	// The file as last seen, to find it when it is renamed.
-	known, _ := os.Lstat(w.Root())
-	known = StatIdentity(known)
 	for {
-		events, err := w.Next(ctx)
-		if err != nil {
+		r := w.next(ctx)
+		if r.err != nil {
 			return
 		}
+		// The file the watch saw go away, by what it was when the watch
+		// last saw it: a look now may come after the next rename.
 		moved := ""
-		if events[len(events)-1].Op == FileRemove && known != nil {
-			moved = findRenamed(filepath.Dir(w.Root()), known)
+		if r.events[len(r.events)-1].Op == FileRemove && r.gone.ok {
+			moved = findRenamed(filepath.Dir(w.Root()), r.gone.id)
 		}
 		for _, b := range documentsAt(path) {
 			if moved != "" {
@@ -100,21 +99,22 @@ func watchDocumentFile(ctx context.Context, path string) {
 		if moved != "" {
 			return // moved watches the new path
 		}
-		if info, err := os.Lstat(w.Root()); err == nil {
-			known = StatIdentity(info)
-		}
 	}
 }
 
-// findRenamed returns the path of the file in dir that is the file info
-// describes, or "".
-func findRenamed(dir string, info os.FileInfo) string {
+// findRenamed returns the path of the file in dir that is the file id
+// identifies, or "".
+func findRenamed(dir string, id fileWatchID) string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
 	}
 	for _, entry := range entries {
-		if other, err := entry.Info(); err == nil && os.SameFile(info, other) {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if other, ok := fileWatchIdentity(StatIdentity(info)); ok && other == id {
 			return filepath.Join(dir, entry.Name())
 		}
 	}

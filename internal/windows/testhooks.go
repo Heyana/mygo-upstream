@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/egoist/mygo/internal/accelerator"
@@ -288,11 +289,16 @@ func TestClickSurface(hwnd uintptr, x, y float64) bool {
 
 // TestInputClick clicks a point of a window showing native UI with the
 // system's input, as a mouse does: the window it lands on activates as
-// for the user.
-func TestInputClick(hwnd uintptr, x, y float64) bool {
+// for the user. The system delivers the click later, through the thread's
+// queue: TestInputClick handles the messages that come until the release
+// reaches a window of the app, so that the app handled the click when it
+// returns. It reports false for a window showing a web page, and when no
+// release came in 10 seconds, missed describes the window under the
+// point, which took the click.
+func TestInputClick(hwnd uintptr, x, y float64) (ok bool, missed string) {
 	w := theBackend.windows[hwnd]
 	if w == nil || w.surface == nil {
-		return false
+		return false, ""
 	}
 	scale := float64(w.surface.dpi()) / 96
 	pt := point{int32(x * scale), int32(y * scale)}
@@ -302,7 +308,45 @@ func TestInputClick(hwnd uintptr, x, y float64) bool {
 	const leftDown, leftUp = 0x0002, 0x0004
 	mouse.Call(leftDown, 0, 0, 0, 0)
 	mouse.Call(leftUp, 0, 0, 0, 0)
-	return true
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		procMsgWaitForMultipleObjectsEx.Call(0, 0, 100, qsAllInput, mwmoInputAvailable)
+		var m msg
+		for {
+			if r, _, _ := procPeekMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0, pmRemove); r == 0 {
+				break
+			}
+			if m.Message == wmQuit {
+				procPostQuitMessage.Call(m.WParam) // for the loop running outside
+				return true, "the app quit"
+			}
+			procTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
+			procDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
+			if m.Message == wmLButtonUp {
+				return true, ""
+			}
+		}
+	}
+	return true, windowAt(pt)
+}
+
+// windowAt describes the top-level window at a point of the screen, in
+// physical pixels: its class, title and process.
+func windowAt(pt point) string {
+	h, _, _ := user32.NewProc("WindowFromPoint").Call(uintptr(uint32(pt.X)) | uintptr(uint32(pt.Y))<<32)
+	if h == 0 {
+		return "no window"
+	}
+	const gaRoot = 2
+	if root, _, _ := user32.NewProc("GetAncestor").Call(h, gaRoot); root != 0 {
+		h = root
+	}
+	class := make([]uint16, 256)
+	user32.NewProc("GetClassNameW").Call(h, uintptr(unsafe.Pointer(&class[0])), uintptr(len(class)))
+	title := make([]uint16, 256)
+	procGetWindowTextW.Call(h, uintptr(unsafe.Pointer(&title[0])), uintptr(len(title)))
+	var pid uint32
+	user32.NewProc("GetWindowThreadProcessId").Call(h, uintptr(unsafe.Pointer(&pid)))
+	return fmt.Sprintf("%#x, class %q, title %q, process %d (this one %d)", h, syscall.UTF16ToString(class), syscall.UTF16ToString(title), pid, syscall.Getpid())
 }
 
 // TestSideButton clicks a mouse's back or forward button (XBUTTON1 and

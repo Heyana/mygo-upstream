@@ -33,15 +33,47 @@ func registerClipboardFormat(name string) uint32 {
 	return uint32(r)
 }
 
-// open opens the clipboard, retrying while another program holds it.
-func (c clipboard) open() bool {
-	for i := 0; i < 10; i++ {
-		if r, _, _ := procOpenClipboard.Call(c.b.appHwnd); r != 0 {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
+// The clipboard is a lock of the whole session: OpenClipboard fails, and
+// OleSetClipboard and OleFlushClipboard with CLIPBRD_E_CANT_OPEN, while
+// another program has it open, as Windows' clipboard history and clipboard
+// managers do right after every change to read it. That program may be
+// waiting for this one to render data it offered (WM_RENDERFORMAT), which
+// only a thread handling its sent messages does: while it retries, the main
+// thread handles them rather than sleeping, or neither would get on.
+const clipboardPatience = time.Second
+
+// retryClipboard calls try until it gets the clipboard or the clipboard
+// stayed busy for clipboardPatience. Main thread only.
+func retryClipboard(try func() (busy bool)) {
+	deadline := time.Now().Add(clipboardPatience)
+	for try() && time.Now().Before(deadline) {
+		// Wait for a message sent by another thread, at most 10 ms, and
+		// handle the messages sent.
+		procMsgWaitForMultipleObjectsEx.Call(0, 0, 10, qsSendMessage, 0)
+		var m msg
+		procPeekMessageW.Call(uintptr(unsafe.Pointer(&m)), 0, 0, 0, pmNoRemove|pmQSSendMessage)
 	}
-	return false
+}
+
+// open opens the clipboard, waiting while another program holds it.
+func (c clipboard) open() bool {
+	opened := false
+	retryClipboard(func() bool {
+		r, _, _ := procOpenClipboard.Call(c.b.appHwnd)
+		opened = r != 0
+		return !opened
+	})
+	return opened
+}
+
+// oleClipboard calls OleSetClipboard or OleFlushClipboard, waiting while
+// another program holds the clipboard.
+func oleClipboard(call func() uintptr) (hr uintptr) {
+	retryClipboard(func() bool {
+		hr = call()
+		return hr == clipbrdECantOpen
+	})
+	return hr
 }
 
 func closeClipboard() { procCloseClipboard.Call() }

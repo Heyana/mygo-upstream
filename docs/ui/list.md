@@ -61,6 +61,10 @@ behaves and to move it:
   state of a row (focus, text being edited, …) follows its item, and the
   list keeps its place, and its choice, when rows are added or removed
   above them, as when older messages load.
+- `KeepOffset` keeps a list with a `Key` at its offset as its rows move,
+  rather than with the item at its top, for rows sorted again as they
+  change, as a process monitor's: the rows' state and the choice still
+  follow their items.
 - `FollowEnd` starts the list at its end, and keeps the end in view as rows
   come or grow, until the user scrolls away from it, as a chat or a log
   does; scrolling back to the end follows it again. `FollowAnimation`

@@ -26,7 +26,7 @@ func TestSoftwareModifiersUseSessionEncoder(t *testing.T) {
 		mods = c.mods
 		tt.Frame()
 		tt.Type(c.text)
-		if got := conn.take(len(c.want)); got != c.want {
+		if got := conn.take(term); got != c.want {
 			t.Fatalf("%v + %s: %q, want %q", c.mods, c.text, got, c.want)
 		}
 	}
@@ -35,21 +35,21 @@ func TestSoftwareModifiersUseSessionEncoder(t *testing.T) {
 	mods = ui.Ctrl
 	tt.Frame()
 	tt.Type("c")
-	if got := conn.take(7); got != "\x1b[99;5u" {
+	if got := conn.take(term); got != "\x1b[99;5u" {
 		t.Fatal("software Ctrl bypassed Kitty encoding", got)
 	}
 	mods = ui.Super
 	tt.Frame()
 	tt.Type("k")
-	if got := conn.take(8); got != "\x1b[107;9u" {
+	if got := conn.take(term); got != "\x1b[107;9u" {
 		t.Fatal("software Cmd bypassed Kitty encoding", got)
 	}
 	term.Feed([]byte("\x1b[<u\x1b[?1h"))
 	tt.Frame()
-	if !term.SendKey(ui.KeyUp, 0) || conn.take(3) != "\x1bOA" {
+	if !term.SendKey(ui.KeyUp, 0) || conn.take(term) != "\x1bOA" {
 		t.Fatal("accessory arrow ignored application cursor mode")
 	}
-	if !term.SendKey(ui.KeyBackslash, ui.Shift) || conn.take(1) != "|" {
+	if !term.SendKey(ui.KeyBackslash, ui.Shift) || conn.take(term) != "|" {
 		t.Fatal("accessory symbol ignored Shift")
 	}
 	// The native Return/Delete keys also receive virtual modifiers, including
@@ -59,7 +59,7 @@ func TestSoftwareModifiersUseSessionEncoder(t *testing.T) {
 	tt.Frame()
 	tt.Key(0, ui.KeyBackspace)
 	want := "\x1b[127;5u\x1b[127;5:3u"
-	if got := conn.take(len(want)); got != want {
+	if got := conn.take(term); got != want {
 		t.Fatalf("modified Delete lost its press/release: %q", got)
 	}
 }
@@ -84,7 +84,7 @@ func TestSoftwareCmdSelectionAndBracketedPaste(t *testing.T) {
 	tt.Frame()
 	tt.SetClipboard("pasted")
 	tt.Type("v")
-	if got := conn.take(18); got != "\x1b[200~pasted\x1b[201~" {
+	if got := conn.take(term); got != "\x1b[200~pasted\x1b[201~" {
 		t.Fatal("Cmd+V bypassed bracketed paste", got)
 	}
 }

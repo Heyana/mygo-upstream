@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/internal/wait"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -299,7 +300,7 @@ func beforeRun(source mygo.ThemeSource) {
 // from the system's.
 func TestBeforeRun(t *testing.T) {
 	for _, source := range []mygo.ThemeSource{mygo.ThemeDark, mygo.ThemeLight} {
-		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), wait.Guard)
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
 		cmd.Env = append(os.Environ(), "MYGO_E2E_BEFORE_RUN="+string(source))
 		b, err := cmd.CombinedOutput()
@@ -372,7 +373,7 @@ func TestPopupMenu(t *testing.T) {
 		shown, _ = dismissPopups()
 		select {
 		case <-done:
-		case <-time.After(3 * time.Second):
+		case <-time.After(wait.Guard):
 			t.Fatal("the popup did not return")
 		}
 		return shown
@@ -405,12 +406,12 @@ func TestPopupMenu(t *testing.T) {
 		if got != w {
 			t.Errorf("context menu window = %v, want window %d", got, w.ID())
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("the context menu click was not delivered")
 	}
 	select {
 	case <-done:
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("the context menu did not return after choosing an item")
 	}
 }
@@ -431,7 +432,7 @@ func TestEarlyWindow(t *testing.T) {
 		if w.Title() != "early" {
 			t.Errorf("title = %q", w.Title())
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("the window requested before Run was not created")
 	}
 }
@@ -439,9 +440,9 @@ func TestEarlyWindow(t *testing.T) {
 // waitFor polls the page until expr is truthy. Until a page being loaded
 // commits, expr runs in the previous one, such as the empty document a new
 // window starts with, which is complete already: wait for something of the
-// page itself. The 10 seconds start once the page first answers: WebView2
-// creates a window's webview asynchronously, and evaluating waits for it,
-// which may take longer than that on a slow runner.
+// page itself. It waits up to wait.Guard for the page to answer at all
+// (WebView2 creates a window's webview asynchronously, and evaluating
+// waits for it), then up to wait.Guard again for expr.
 func waitFor(t testing.TB, w *mygo.Window, expr string) {
 	t.Helper()
 	waitForPage(t, w.Page(), expr)
@@ -452,7 +453,7 @@ func waitForPage(t testing.TB, p *mygo.Page, expr string) {
 	t.Helper()
 	check := "!!(" + expr + ")"
 	start := time.Now()
-	first, cancel := context.WithTimeout(t.Context(), time.Minute)
+	first, cancel := context.WithTimeout(t.Context(), wait.Guard)
 	v, err := p.EvalContext(first, check)
 	late := err != nil && first.Err() != nil
 	cancel()
@@ -460,12 +461,11 @@ func waitForPage(t testing.TB, p *mygo.Page, expr string) {
 	if late {
 		t.Fatalf("waiting for %s: the page did not answer in %v: %v; %s", expr, answered.Round(time.Millisecond), err, pageState(p))
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
+	ctx := wait.Context(t)
 	for v != true {
 		select {
 		case <-ctx.Done():
-			msg := fmt.Sprintf("timed out waiting for %s, 10s after the page first answered (in %v)", expr, answered.Round(time.Millisecond))
+			msg := fmt.Sprintf("%s never became true, %v after the page first answered (in %v)", expr, wait.Guard, answered.Round(time.Millisecond))
 			if err != nil {
 				msg += "; the last check failed: " + err.Error()
 			}
@@ -575,7 +575,7 @@ func TestChannels(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("context of the stopped call: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("the method did not stop")
 	}
 }
@@ -877,12 +877,7 @@ func TestRestoreMaximizedCaptionless(t *testing.T) {
 		w.Restore()
 		eventually(t, "the maximized window back", func() bool { return !w.IsMinimized() && w.IsMaximized() })
 		var b mygo.Rectangle
-		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			if b = w.ContentBounds(); b == want {
-				break
-			}
-		}
-		if b != want {
+		if !wait.Poll(func() bool { b = w.ContentBounds(); return b == want }) {
 			t.Errorf("display %d (primary %v): the client area came back at %+v, want %+v", i, d.Primary, b, want)
 		}
 	}
@@ -1154,10 +1149,7 @@ func TestMenuLetters(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 			menus, _ = popupMenus()
 		}
-		for deadline := time.Now().Add(3 * time.Second); fmt.Sprint(menus) != fmt.Sprint(want) && time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-			menus, _ = popupMenus()
-		}
-		if fmt.Sprint(menus) != fmt.Sprint(want) {
+		if !wait.Poll(func() bool { menus, _ = popupMenus(); return fmt.Sprint(menus) == fmt.Sprint(want) }) {
 			t.Errorf("Alt+%c opened %q, want %q", letter, menus, want)
 		}
 	}
@@ -1284,13 +1276,7 @@ func TestResizeBelowMinimum(t *testing.T) {
 // eventually waits for cond, which polls the window system.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	wait.Until(t, what, cond)
 }
 
 // windowStateRuns numbers the runs of TestWindowState: the state file is
@@ -1652,7 +1638,7 @@ func TestDockMenu(t *testing.T) {
 	}
 	select {
 	case <-clicked:
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Error("clicking the Dock menu item did not reach its handler")
 	}
 	mygo.App.Dock.SetMenu(nil)
@@ -1802,7 +1788,7 @@ func TestDownloads(t *testing.T) {
 			if e.SuggestedName != name {
 				t.Errorf("%s: suggested name %q, want %q", what, e.SuggestedName, name)
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(wait.Guard):
 			t.Fatalf("%s: OnWillDownload was not called", what)
 		}
 		select {
@@ -1813,7 +1799,7 @@ func TestDownloads(t *testing.T) {
 			if b, err := os.ReadFile(d.Path); err != nil || string(b) != content {
 				t.Errorf("%s: saved %q, %v", what, b, err)
 			}
-		case <-time.After(10 * time.Second):
+		case <-time.After(wait.Guard):
 			t.Fatalf("%s: OnDownloadDone was not called", what)
 		}
 	}
@@ -1886,7 +1872,7 @@ func TestGlobalShortcut(t *testing.T) {
 	}
 	select {
 	case <-pressed:
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("the global shortcut was not reported")
 	}
 }
@@ -1961,7 +1947,7 @@ func TestCloseEvents(t *testing.T) {
 	w.Close()
 	select {
 	case <-closed:
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("OnClosed not called")
 	}
 }
@@ -2104,7 +2090,7 @@ func TestWindowOpenHandler(t *testing.T) {
 		if u != "https://example.com/popup" {
 			t.Errorf("opened %q", u)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("window open handler not called")
 	}
 }
@@ -2149,11 +2135,7 @@ func TestMenuActivation(t *testing.T) {
 	if err := activateMenu(w, "Test", "Check"); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for !menu.ItemByID("check").IsChecked() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !menu.ItemByID("check").IsChecked() {
+	if !wait.Poll(menu.ItemByID("check").IsChecked) {
 		t.Error("checkbox not toggled by activation")
 	}
 	if handled, ok := pressShortcut("y", true); ok {
@@ -2213,7 +2195,7 @@ func TestMenuActivationWindow(t *testing.T) {
 					if got != w {
 						t.Fatalf("click window = %v, want window %d", got, w.ID())
 					}
-				case <-time.After(3 * time.Second):
+				case <-time.After(wait.Guard):
 					t.Fatal("menu click was not delivered")
 				}
 				if width, height := w.Size(); width != 1000 || height != 720 {
@@ -2346,7 +2328,7 @@ func TestHiddenTitleBar(t *testing.T) {
 		if slices.Contains(names, "close") && pressTitleButton(w, "close") {
 			select {
 			case <-closing:
-			case <-time.After(3 * time.Second):
+			case <-time.After(wait.Guard):
 				t.Error("the close button did not ask to close the window")
 			}
 		}
@@ -2369,7 +2351,7 @@ func expectClick(t *testing.T, clicks chan string, want string) {
 		if got != want {
 			t.Errorf("clicked %q, want %q", got, want)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatalf("menu item %q was not clicked", want)
 	}
 }
@@ -2389,23 +2371,15 @@ func TestJavaScriptAlert(t *testing.T) {
 		_, err := w.Page().Eval("setTimeout(() => { alert('hello'); window.alertDone = true }, 0)")
 		evaluated <- err
 	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if ok, _ := endSheet(w); ok {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("alert sheet never appeared")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	select {
-	case err := <-evaluated:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Eval did not return after the alert was dismissed")
+	// The sheet takes a while: beginSheetModalForWindow: animates it in
+	// before it returns, and the main thread runs nothing else meanwhile.
+	eventually(t, "the alert sheet", func() bool {
+		ok, _ := endSheet(w)
+		return ok
+	})
+	eventually(t, "the Eval to return after the alert was dismissed", func() bool { return len(evaluated) > 0 })
+	if err := <-evaluated; err != nil {
+		t.Fatal(err)
 	}
 	waitFor(t, w, "window.alertDone")
 }
@@ -2428,7 +2402,7 @@ func TestWindowOpenAllowed(t *testing.T) {
 	var child *mygo.Window
 	select {
 	case child = <-created:
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("child window not created")
 	}
 	defer child.Destroy()
@@ -2452,6 +2426,11 @@ func TestClick(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300})
 	w.Page().LoadHTML(`<body style="margin:0"><button id="b" style="width:200px;height:100px" onclick="window.clicked=(window.clicked||0)+1">x</button></body>`, "")
 	waitFor(t, w, "document.getElementById('b')")
+	// A user clicks the window of the app in front. A click in a window
+	// that is not key yet, or of an app another app took the foreground
+	// from, is a first click, which WebKit does not give the page.
+	w.Focus()
+	eventually(t, "the window focused", w.IsFocused)
 	if !click(w, 50, 50) {
 		t.Skip("click automation not available on this platform")
 	}
@@ -2462,6 +2441,8 @@ func TestClick(t *testing.T) {
 	f := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300, Frameless: true})
 	f.Page().LoadHTML(`<body style="margin:0"><div id="bar" style="--app-region:drag;height:40px" onmousedown="window.pressed=true"></div></body>`, "")
 	waitFor(t, f, "document.getElementById('bar')")
+	f.Focus()
+	eventually(t, "the frameless window focused", f.IsFocused)
 	click(f, 100, 20)
 	waitFor(t, f, "window.pressed === true")
 	if !f.IsVisible() {
@@ -3161,12 +3142,9 @@ func TestContentWindowRepaintsWhatChanged(t *testing.T) {
 		w.Update(func() { red.Store(int32(to)) })
 		eventually(t, "a frame after Update", func() bool { return frames.Load() > before })
 		want := strings.Repeat("ww", to) + "rr" + strings.Repeat("ww", 2-to)
-		deadline := time.Now().Add(5 * time.Second)
-		for shown := rows(); shown != want; shown = rows() {
-			if time.Now().After(deadline) {
-				t.Fatalf("with row %d red, the display shows %q, not %q", to, shown, want)
-			}
-			time.Sleep(20 * time.Millisecond)
+		var shown string
+		if !wait.Poll(func() bool { shown = rows(); return shown == want }) {
+			t.Fatalf("with row %d red, the display shows %q, not %q", to, shown, want)
 		}
 	}
 }

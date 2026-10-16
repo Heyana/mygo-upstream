@@ -34,7 +34,7 @@ func TestPrimaryScreenDragSelectsListMarkerWithMouseTracking(t *testing.T) {
 			if got := tt.Clipboard(); got != "4. 命令起始位置显示结果" {
 				t.Fatalf("PrimaryScreen drag copied %q", got)
 			}
-			if got := conn.take(1); strings.Contains(got, "\x1b[<0;") || strings.Contains(got, "\x1b[<32;") {
+			if got := conn.take(term); strings.Contains(got, "\x1b[<0;") || strings.Contains(got, "\x1b[<32;") {
 				t.Fatalf("selection sent mouse events to PrimaryScreen: %q", got)
 			}
 			if line := term.v.lines[0]; !line.sel || line.selA != 0 {
@@ -71,11 +71,7 @@ func TestApplicationSelectionOnlyOwnsTrackedAlternateScreenDrags(t *testing.T) {
 				tt.Move(x1, y)
 				tt.Release(x1, y)
 				want := "\x1b[<0;1;1M\x1b[<32;21;1M\x1b[<0;21;1m"
-				minimum := 1
-				if alt && tracking {
-					minimum = len(want)
-				}
-				data := conn.take(minimum)
+				data := conn.take(term)
 				if alt && tracking {
 					if data != want {
 						t.Fatalf("application did not receive complete native drag: %q", data)
@@ -98,7 +94,7 @@ func TestApplicationSelectionOnlyOwnsTrackedAlternateScreenDrags(t *testing.T) {
 					if text, ok := term.SelectedText(); !ok || !strings.Contains(text, "4.") {
 						t.Fatal("Shift did not retain local selection override")
 					}
-					if data := conn.take(1); data != "" {
+					if data := conn.take(term); data != "" {
 						t.Fatalf("Shift selection reached the program: %q", data)
 					}
 				} else if data != "" || tt.Clipboard() == "previous" {
@@ -122,19 +118,19 @@ func TestPrimaryScreenSelectionKeepsClicksWheelAndOverrides(t *testing.T) {
 	tt.Frame()
 	x, y := cellCenter(term, 2, 3)
 	tt.Press(x, y)
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Fatalf("PrimaryScreen saw press before click/drag was decided: %q", got)
 	}
 	tt.Release(x, y)
-	if got := conn.take(18); got != "\x1b[<0;3;4M\x1b[<0;3;4m" {
+	if got := conn.take(term); got != "\x1b[<0;3;4M\x1b[<0;3;4m" {
 		t.Fatalf("plain click = %q", got)
 	}
 	tt.Scroll(x, y, 0, 40)
-	if got := conn.take(1); !strings.Contains(got, "\x1b[<65;") {
+	if got := conn.take(term); !strings.Contains(got, "\x1b[<65;") {
 		t.Fatalf("wheel was not passed to PrimaryScreen: %q", got)
 	}
 	tt.ClickAtWith(ui.Alt, x, y)
-	if got := conn.take(18); !strings.Contains(got, "\x1b[<8;3;4M") || !strings.Contains(got, "\x1b[<8;3;4m") {
+	if got := conn.take(term); !strings.Contains(got, "\x1b[<8;3;4M") || !strings.Contains(got, "\x1b[<8;3;4m") {
 		t.Fatalf("Option override = %q", got)
 	}
 	tt.SetClipboard("previous")
@@ -146,7 +142,7 @@ func TestPrimaryScreenSelectionKeepsClicksWheelAndOverrides(t *testing.T) {
 	if got := tt.Clipboard(); got != "4. " && got != "4." {
 		t.Fatalf("quick drag lost marker: %q", got)
 	}
-	if got := conn.take(1); got != "" {
+	if got := conn.take(term); got != "" {
 		t.Fatalf("quick drag became an PrimaryScreen click: %q", got)
 	}
 	tt.RightClickAt(x0, y0)

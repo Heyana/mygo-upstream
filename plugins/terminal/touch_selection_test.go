@@ -38,7 +38,7 @@ func TestMobileLongPressSelectsAndExpandsWithoutRemoteMouse(t *testing.T) {
 	if text, ok := term.SelectedText(); !ok || !strings.Contains(text, "hello 中文🙂 world") {
 		t.Fatalf("select all lost the displayed text: %q", text)
 	}
-	if data := conn.take(1); data != "" {
+	if data := conn.take(term); data != "" {
 		t.Fatalf("mobile selection reached remote program: %q", data)
 	}
 	term.v.input(ui.InputEvent{Kind: ui.InputPointerDown, X: x, Y: y, Button: 0})

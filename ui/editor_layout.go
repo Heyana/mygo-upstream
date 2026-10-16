@@ -198,7 +198,7 @@ func (e *node) paintInput(p *Painter) {
 	}
 	if focused && !ed.readOnly && !e.c.rt.nativeSelection(e.st) {
 		rt := e.c.rt
-		phase := time.Since(rt.blinkStart)
+		phase := e.c.now.Sub(rt.blinkStart)
 		const blink = 530 * time.Millisecond
 		if (phase/blink)%2 == 0 {
 			x, y, h := l.CaretAt(text.CaretPosition{Index: ed.displayIndex(ed.caret) + ed.composeCaret, Affinity: ed.caretAffinity})

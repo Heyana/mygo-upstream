@@ -74,7 +74,7 @@ func TestSelectionDragScrollsAcrossPagesAtViewportEdges(t *testing.T) {
 				if v.ticking || v.screen().Scrollbar().Offset != stopped || tt.Clipboard() == "" {
 					t.Fatal("release did not stop scrolling and copy the expanded selection")
 				}
-				if data := conn.take(1); data != "" {
+				if data := conn.take(term); data != "" {
 					t.Fatalf("local selection reached the mouse-aware program: %q", data)
 				}
 			})

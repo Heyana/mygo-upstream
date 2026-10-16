@@ -103,13 +103,8 @@ func (rt *engine) finalizeInputs(all bool) {
 		}
 		n.valueInput(n)
 	}
-	for ; rt.inputAt < len(rt.inputs); rt.inputAt++ {
-		if built(rt.inputs[rt.inputAt].building) {
-			apply(rt.inputAt)
-		} else {
-			rt.waitingInputs = append(rt.waitingInputs, rt.inputAt)
-		}
-	}
+	// Those waiting were queued before the cursor's, so they go first:
+	// a list's rows take their clicks before the list its keys.
 	rt.waitingInputs = slices.DeleteFunc(rt.waitingInputs, func(i int) bool {
 		if !built(rt.inputs[i].building) {
 			return false
@@ -117,16 +112,16 @@ func (rt *engine) finalizeInputs(all bool) {
 		apply(i)
 		return true
 	})
+	for ; rt.inputAt < len(rt.inputs); rt.inputAt++ {
+		if built(rt.inputs[rt.inputAt].building) {
+			apply(rt.inputAt)
+		} else {
+			rt.waitingInputs = append(rt.waitingInputs, rt.inputAt)
+		}
+	}
 	act := func(i int) {
 		if a := rt.afterInputs[i]; a.node != nil && !a.node.disabled() {
 			a.fn()
-		}
-	}
-	for ; rt.afterInputAt < len(rt.afterInputs); rt.afterInputAt++ {
-		if built(rt.afterInputs[rt.afterInputAt].building) {
-			act(rt.afterInputAt)
-		} else {
-			rt.waitingActions = append(rt.waitingActions, rt.afterInputAt)
 		}
 	}
 	rt.waitingActions = slices.DeleteFunc(rt.waitingActions, func(i int) bool {
@@ -136,6 +131,13 @@ func (rt *engine) finalizeInputs(all bool) {
 		act(i)
 		return true
 	})
+	for ; rt.afterInputAt < len(rt.afterInputs); rt.afterInputAt++ {
+		if built(rt.afterInputs[rt.afterInputAt].building) {
+			act(rt.afterInputAt)
+		} else {
+			rt.waitingActions = append(rt.waitingActions, rt.afterInputAt)
+		}
+	}
 	if len(rt.notices) > 0 {
 		rt.consumed = true
 	}

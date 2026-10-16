@@ -248,8 +248,7 @@ func TestEditableTextInTable(t *testing.T) {
 	if tt.HasText("beach.jpeg") != true {
 		t.Fatal("the click edited at once")
 	}
-	time.Sleep(renameDelay + 50*time.Millisecond)
-	tt.Frame()
+	tt.Advance(renameDelay + 50*time.Millisecond)
 	tt.Type("sea")
 	tt.Click("notes.txt")
 	if names[1] != "sea.jpeg" || sel != 0 {
@@ -258,8 +257,7 @@ func TestEditableTextInTable(t *testing.T) {
 	// A double click opens, and does not edit.
 	tt.Click("notes.txt")
 	tt.Click("notes.txt")
-	time.Sleep(renameDelay + 50*time.Millisecond)
-	tt.Frame()
+	tt.Advance(renameDelay + 50*time.Millisecond)
 	tt.Type("x")
 	if opened != 0 || names[0] != "notes.txt" {
 		t.Errorf("a double click: opened %d, the name %q", opened, names[0])

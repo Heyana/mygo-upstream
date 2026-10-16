@@ -16,6 +16,9 @@ type FileWatch struct {
 	closed  bool
 	// Subtree makes Add accept Subtree targets, as Windows does.
 	Subtree bool
+	// NoFiles makes Add refuse targets that aren't directories, as every
+	// system backend does.
+	NoFiles bool
 	// AddHook, when set, runs in Add before the target is enrolled; an
 	// error it returns is Add's.
 	AddHook func(platform.FileWatchTarget) error
@@ -27,7 +30,7 @@ func (b *Backend) NewFileWatch(notify func(platform.FileWatchNotice)) (platform.
 	if b.FileWatchError != nil {
 		return nil, b.FileWatchError
 	}
-	w := &FileWatch{targets: map[uint64]platform.FileWatchTarget{}, notify: notify, Subtree: b.FileWatchSubtree, AddHook: b.FileWatchAddHook}
+	w := &FileWatch{targets: map[uint64]platform.FileWatchTarget{}, notify: notify, Subtree: b.FileWatchSubtree, NoFiles: b.FileWatchNoFiles, AddHook: b.FileWatchAddHook}
 	b.FileWatches = append(b.FileWatches, w)
 	return w, nil
 }
@@ -40,7 +43,7 @@ func (b *Backend) LastFileWatch() *FileWatch {
 }
 
 func (w *FileWatch) Add(t platform.FileWatchTarget) error {
-	if t.Subtree && !w.Subtree {
+	if t.Subtree && !w.Subtree || !t.Directory && w.NoFiles {
 		return platform.ErrUnsupported
 	}
 	if hook := w.AddHook; hook != nil {

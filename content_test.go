@@ -16,6 +16,7 @@ import (
 
 	"github.com/egoist/mygo/internal/fake"
 	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/wait"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -51,7 +52,7 @@ func TestContentReadyToShow(t *testing.T) {
 	onMain(func() { s.Frame() })
 	select {
 	case <-ready:
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("not ready after its first frame")
 	}
 	w.Invalidate()

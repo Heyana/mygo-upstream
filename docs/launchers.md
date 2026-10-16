@@ -35,12 +35,12 @@ func main() {
 ```
 
 A packaged app says it from the start, so that macOS never shows it in the
-Dock, with `LSUIElement` in [`mygo.config.ts`](configuration.md):
+Dock, with `LSUIElement` in [`mygo.json`](configuration.md#mygojson):
 
-```ts
-export default defineConfig({
-  macos: { infoPlist: { LSUIElement: true } },
-});
+```json
+{
+  "macos": { "infoPlist": { "LSUIElement": true } }
+}
 ```
 
 A tray icon gives the user a way in other than the shortcut, and to quit;

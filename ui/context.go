@@ -496,6 +496,9 @@ type state struct {
 	cursor         Cursor
 	// tip marks an element with a tooltip (TooltipBase).
 	tip bool
+	// effectLayer is what the element and its children render into for
+	// its Effect, kept from frame to frame.
+	effectLayer *Canvas
 	// webView is the web view the element shows (WebView).
 	webView NativeWebView
 

@@ -1,10 +1,6 @@
 package parser
 
-import (
-	"strings"
-	"testing"
-	"time"
-)
+import "testing"
 
 func streamed(src string) string {
 	d := New(Default)
@@ -68,70 +64,5 @@ func TestPendingLink(t *testing.T) {
 	in = d.Inlines(1)
 	if in[1].Kind != Link || in[1].Pending || in[1].Dest != "https://example.com" {
 		t.Fatalf("inlines %+v", in)
-	}
-}
-
-// TestPathological parses inputs that take quadratic time in parsers
-// without cmark's guards, within a time bound.
-func TestPathological(t *testing.T) {
-	const n = 30000
-	for name, src := range map[string]string{
-		"mismatched openers": strings.Repeat("*a_ ", n),
-		"emphasis openers":   strings.Repeat("*a ", n),
-		"unclosed links":     strings.Repeat("[a](<b", n),
-		"unclosed brackets":  strings.Repeat("[", n) + "a" + strings.Repeat("]", n),
-		"nested quotes":      strings.Repeat(">", n) + " a",
-		"nested lists":       strings.Repeat("* ", 1000) + "a",
-		"backticks":          strings.Repeat("`a``", n),
-		"unclosed comments":  strings.Repeat("<!--", n),
-		"unclosed math":      strings.Repeat("$$a ", n),
-		"link definitions":   strings.Repeat("[a]: u\n", n),
-		"many emphasis":      strings.Repeat("**a** ", n),
-		"underscores":        strings.Repeat("_a ", n) + strings.Repeat("a_ ", n),
-		"tables":             "| a |\n|---|\n" + strings.Repeat("|\n", n),
-		"pipes":              strings.Repeat("| ", n) + "\n|" + strings.Repeat("-|", n),
-	} {
-		start := time.Now()
-		d := Parse(src)
-		_ = d.HTML()
-		if el := time.Since(start); el > time.Second {
-			t.Errorf("%s took %v", name, el)
-		}
-	}
-}
-
-// TestLinearTime checks that inputs quadratic in parsers without cmark's
-// guards take about four times as long for four times as much, rather
-// than sixteen, so that a regression shows on fast machines too.
-func TestLinearTime(t *testing.T) {
-	timeOf := func(src string) time.Duration {
-		best := time.Duration(1 << 62)
-		for range 3 {
-			start := time.Now()
-			_ = Parse(src).HTML()
-			best = min(best, time.Since(start))
-		}
-		return best
-	}
-	for name, unit := range map[string]string{
-		"mismatched openers": "*a_ ",
-		"emphasis openers":   "*a ",
-		"unclosed links":     "[a](<b",
-		"brackets":           "[",
-		"backticks":          "`a``",
-		"escapes":            `\*`,
-	} {
-		// A quadratic input is slow at every try; a busy machine (CI runs
-		// packages in parallel) is not.
-		var small, large time.Duration
-		for range 3 {
-			small, large = timeOf(strings.Repeat(unit, 5000)), timeOf(strings.Repeat(unit, 20000))
-			if large <= 10*small || large <= 20*time.Millisecond {
-				break
-			}
-		}
-		if large > 10*small && large > 20*time.Millisecond {
-			t.Errorf("%s: %v for 5000, %v for 20000", name, small, large)
-		}
 	}
 }

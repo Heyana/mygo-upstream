@@ -98,11 +98,12 @@ type Backend struct {
 	Online, Metered bool
 	WatchingNetwork bool
 	// FileWatches are the file watches made, FileWatchError what making
-	// one fails with, and FileWatchSubtree whether they take Subtree
-	// targets.
+	// one fails with, FileWatchSubtree whether they take Subtree targets
+	// and FileWatchNoFiles whether they refuse files.
 	FileWatches      []*FileWatch
 	FileWatchError   error
 	FileWatchSubtree bool
+	FileWatchNoFiles bool
 	// FileWatchAddHook is the AddHook of the file watches made.
 	FileWatchAddHook func(platform.FileWatchTarget) error
 	// URLSchemes are the registered URL schemes, by scheme: "id name".

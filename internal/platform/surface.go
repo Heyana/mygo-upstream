@@ -214,7 +214,9 @@ const (
 	// PointerMove reports the pointer at X, Y.
 	PointerMove
 	// PointerDown and PointerUp report Button pressed or released at X,
-	// Y; Clicks counts quick successive presses (2 for a double click).
+	// Y; Clicks counts quick successive presses (2 for a double click),
+	// by the system's double-click settings. A release may leave it 0, for
+	// its press's.
 	PointerDown
 	PointerUp
 	// PointerLeave reports the pointer left the surface.

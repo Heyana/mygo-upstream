@@ -2,7 +2,6 @@ package richtext
 
 import (
 	"runtime"
-	"time"
 	"unicode"
 
 	"github.com/egoist/mygo/internal/rope"
@@ -19,7 +18,7 @@ func (v *view) input(ev ui.InputEvent) bool {
 	switch ev.Kind {
 	case ui.InputKeyDown:
 		if v.key(ev.Key, ev.Mods) {
-			v.blinkStart = time.Now()
+			v.blinkStart = ev.Time
 			return true
 		}
 		return false
@@ -30,7 +29,7 @@ func (v *view) input(ev ui.InputEvent) bool {
 		v.compose = ""
 		v.insert(ev.Text)
 		v.typed(ev.Text)
-		v.blinkStart = time.Now()
+		v.blinkStart = ev.Time
 		return true
 	case ui.InputCommand:
 		return v.editCommand(ev.Text)

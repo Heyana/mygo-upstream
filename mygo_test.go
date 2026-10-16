@@ -28,6 +28,7 @@ import (
 	"github.com/egoist/mygo/internal/fake"
 	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/tsgen"
+	"github.com/egoist/mygo/internal/wait"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
@@ -104,8 +105,8 @@ func secret(fw *fake.Window) string {
 // received waits until the page received a message matching pred.
 func received(t *testing.T, fw *fake.Window, pred func(m map[string]any) bool) map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	var found map[string]any
+	if wait.Poll(func() bool {
 		for _, s := range fw.Scripts() {
 			const prefix = "__mygo.receive("
 			if !strings.HasPrefix(s, prefix) {
@@ -117,11 +118,14 @@ func received(t *testing.T, fw *fake.Window, pred func(m map[string]any) bool) m
 			}
 			for _, m := range msgs {
 				if pred(m) {
-					return m
+					found = m
+					return true
 				}
 			}
 		}
-		time.Sleep(5 * time.Millisecond)
+		return false
+	}) {
+		return found
 	}
 	t.Fatalf("message not received; scripts: %q", fw.Scripts())
 	return nil
@@ -593,7 +597,7 @@ func TestCallContextCanceledOnNavigation(t *testing.T) {
 	onMain(func() { fw.H.NavigationCommitted("https://next.example/") })
 	select {
 	case <-pc.Done():
-	case <-time.After(time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("page context not canceled after navigation")
 	}
 	if w.pageContext().Err() != nil {
@@ -721,14 +725,15 @@ func TestChannels(t *testing.T) {
 		t.Fatalf("Send did not wait for the page: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
-	// The main thread posts the values Send queued as it gets to them.
+	// Send queued each value and posted the flush that hands it to the
+	// page before it returned. The main loop runs functions in the order
+	// they were posted, so once one posted now has run, that flush has too,
+	// however long the main thread took to get to it.
+	onMain(func() {})
 	asks := 0
-	for deadline := time.Now().Add(3 * time.Second); asks < 2 && time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
-		asks = 0
-		for _, m := range pageMessages(t, fw) {
-			if m["c"] == float64(8) && m["a"] == float64(1) {
-				asks++
-			}
+	for _, m := range pageMessages(t, fw) {
+		if m["c"] == float64(8) && m["a"] == float64(1) {
+			asks++
 		}
 	}
 	if asks != 2 {
@@ -784,7 +789,7 @@ func TestChannels(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("call context of a channel closed early: %v", err)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("a channel the page closed before its call started did not cancel the call")
 	}
 	if err := <-s.sent; !errors.Is(err, ErrChannelClosed) {
@@ -812,7 +817,7 @@ func TestChannelsClosedAtOnce(t *testing.T) {
 	for range n {
 		select {
 		case <-s.stopped:
-		case <-time.After(5 * time.Second):
+		case <-time.After(wait.Guard):
 			t.Fatal("a call whose channel the page closed was not canceled")
 		}
 	}
@@ -999,15 +1004,26 @@ func TestEval(t *testing.T) {
 }
 
 // TestEvalLateReply: on the main thread, a reply arriving after the
-// context was canceled must not block.
+// cancellation of the context was delivered, before EvalContext took it,
+// must not block.
 func TestEvalLateReply(t *testing.T) {
 	w, fw := testWindow(t, WindowOptions{})
 	ctx, cancel := context.WithCancel(context.Background())
+	delivered := make(chan struct{})
+	var once sync.Once
+	evalCanceled = func() { once.Do(func() { close(delivered) }) }
+	t.Cleanup(func() { evalCanceled = nil })
 	fw.AsyncCallback = func(body string, reply func(string, error)) {
 		postMain(func() {
 			cancel()
-			time.Sleep(50 * time.Millisecond) // the cancellation is delivered...
-			reply(`{"ok":true,"v":1}`, nil)   // ...then the page answers
+			// The main thread, which EvalContext waits on, is busy here: the
+			// cancellation is delivered...
+			select {
+			case <-delivered:
+			case <-time.After(time.Minute):
+				t.Error("the cancellation was not delivered")
+			}
+			reply(`{"ok":true,"v":1}`, nil) // ...then the page answers
 		})
 	}
 	done := make(chan error, 1)
@@ -1020,7 +1036,7 @@ func TestEvalLateReply(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Errorf("EvalContext = %v", err)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("the late reply blocked the main thread")
 	}
 }
@@ -1050,7 +1066,7 @@ func request(t *testing.T, fw *fake.Window, method, url string, body io.Reader) 
 	onMain(func() { fw.H.SchemeRequest(req) })
 	select {
 	case <-rec.finished:
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("request did not finish")
 	}
 	return rec
@@ -1151,7 +1167,7 @@ func TestProtocolCORS(t *testing.T) {
 		onMain(func() { fw.H.SchemeRequest(req) })
 		select {
 		case <-rec.finished:
-		case <-time.After(3 * time.Second):
+		case <-time.After(wait.Guard):
 			t.Fatal("request did not finish")
 		}
 		return rec
@@ -1256,7 +1272,7 @@ func TestProtocolBodyWriter(t *testing.T) {
 		onMain(func() { fw.H.SchemeRequest(req) })
 		select {
 		case <-rec.finished:
-		case <-time.After(3 * time.Second):
+		case <-time.After(wait.Guard):
 			t.Fatal("request did not finish")
 		}
 	}
@@ -1675,7 +1691,7 @@ func TestThemePreferences(t *testing.T) {
 		if p != want {
 			t.Errorf("Preferences from another goroutine = %+v, want %+v", p, want)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("Preferences from another goroutine hung")
 	}
 }
@@ -2005,12 +2021,46 @@ func TestGlobalShortcut(t *testing.T) {
 	onMain(func() { fb.PressHotkey("CmdOrCtrl+Shift+K") })
 	select {
 	case <-pressed:
-	case <-time.After(time.Second):
+	case <-time.After(wait.Guard):
 		t.Error("shortcut callback not called")
 	}
 	GlobalShortcut.Unregister("CmdOrCtrl+Shift+K")
 	if GlobalShortcut.IsRegistered("CmdOrCtrl+Shift+K") {
 		t.Error("Unregister")
+	}
+}
+
+// TestGlobalShortcutRegisterRace: calls that register the same
+// accelerator at once bind it once, and Unregister leaves nothing of the
+// shortcut behind.
+func TestGlobalShortcutRegisterRace(t *testing.T) {
+	defer GlobalShortcut.UnregisterAll()
+	const acc = "CmdOrCtrl+Alt+Shift+J"
+	var bound, calls atomic.Int32
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := GlobalShortcut.Register(acc, func() { calls.Add(1) }); err == nil {
+				bound.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if n := bound.Load(); n != 1 {
+		t.Errorf("Register(%q) succeeded %d times, want 1", acc, n)
+	}
+	GlobalShortcut.Unregister(acc)
+	if GlobalShortcut.IsRegistered(acc) {
+		t.Error("IsRegistered after Unregister")
+	}
+	onMain(func() { fb.PressHotkey(acc) })
+	if n := calls.Load(); n != 0 {
+		t.Errorf("a shortcut left bound by a lost race fired %d time(s) after Unregister", n)
 	}
 }
 
@@ -2141,7 +2191,7 @@ func TestSingleInstance(t *testing.T) {
 		if !slices.Contains(args, "--from-second") || !slices.Contains(args, "instance") {
 			t.Errorf("forwarded args = %q", args)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("OnSecondInstance not called")
 	}
 	// Deep links started a second instance: the first one opens them.
@@ -2150,7 +2200,7 @@ func TestSingleInstance(t *testing.T) {
 		if u != "mygo-test://open?x=1" {
 			t.Errorf("OnOpenURL got %q", u)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(wait.Guard):
 		t.Fatal("OnOpenURL not called for the forwarded URL")
 	}
 }

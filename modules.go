@@ -534,6 +534,11 @@ var GlobalShortcut = &GlobalShortcutModule{}
 // it, lets them pick other keys, and needs the app installed with its
 // desktop entry. The window fn shows or focuses first gets the activation
 // token of the key press, which lets it take the focus.
+//
+// Register claims the accelerator before the desktop binds it, so that
+// calls arriving at once cannot bind it twice: IsRegistered reports it
+// while the desktop binds it, and a second Register of the same
+// accelerator fails.
 func (g *GlobalShortcutModule) Register(acc string, fn func()) error {
 	needsApp("GlobalShortcut.Register")
 	a, err := accelerator.Parse(acc, runtime.GOOS)
@@ -551,12 +556,25 @@ func (g *GlobalShortcutModule) Register(acc string, fn func()) error {
 	}
 	g.next++
 	id := g.next
+	g.byKey[key] = id
 	g.mu.Unlock()
 	if err := onMainValue(func() error { return backend().RegisterHotkey(id, acc) }); err != nil {
+		g.mu.Lock()
+		if g.byKey[key] == id {
+			delete(g.byKey, key)
+		}
+		g.mu.Unlock()
 		return err
 	}
 	g.mu.Lock()
-	g.byKey[key], g.byID[id], g.keyByID[id] = id, fn, key
+	if g.byKey[key] != id {
+		// Unregistered, or registered again, while the desktop bound it:
+		// give the desktop back the shortcut this call made.
+		g.mu.Unlock()
+		onMain(func() { backend().UnregisterHotkey(id) })
+		return errors.New("mygo: shortcut " + key + " was unregistered while it was being registered")
+	}
+	g.byID[id], g.keyByID[id] = fn, key
 	g.mu.Unlock()
 	return nil
 }

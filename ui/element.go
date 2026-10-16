@@ -276,16 +276,22 @@ type node struct {
 	backface bool
 
 	// Painting.
-	bg           Color
-	fill         fillKind
-	grad         LinearGradient
-	stripes      stripes
-	border       [4]float32 // top, right, bottom, left
-	borderC      Color
-	borderStyle  BorderStyle
-	radius       [4]float32
-	shadows      []shadow
-	material     Material
+	bg          Color
+	fill        fillKind
+	grad        LinearGradient
+	stripes     stripes
+	border      [4]float32 // top, right, bottom, left
+	borderC     Color
+	borderStyle BorderStyle
+	radius      [4]float32
+	shadows     []shadow
+	material    Material
+	effect      Effect
+	effecting   bool
+	// grads holds a conic fill and a border's gradient, which few elements
+	// have; blur is the standard deviation of the element's blur, in DIPs.
+	grads        *gradients
+	blur         float32
 	opacity      float32
 	opacitySet   bool
 	cursor       Cursor
@@ -389,6 +395,10 @@ type node struct {
 	// arrows click the element they move to with groupSelects.
 	focusGroup   Orientation
 	groupSelects bool
+	// placeOn is a sibling, laid out in the parent's flow, whose box an
+	// absolute element's insets are measured from instead of the parent's.
+	// A split uses it to keep its handle on the divider.
+	placeOn *node
 	// overflow is set on a toolbar, whose layout notes there the controls
 	// it had no room for, and takes them out of the flow, collapsed.
 	overflow  *[]toolbarItem
@@ -493,8 +503,8 @@ const (
 	BorderDashed
 )
 
-// LinearGradient blends two colors along a line across a box, as CSS's
-// linear-gradient does with two colors:
+// LinearGradient blends colors along a line across a box, as CSS's
+// linear-gradient does: two, From and To, or as many as its Stops.
 //
 //	e.LinearGradient(ui.LinearGradient{From: blue, To: yellow, Angle: 90, Oklab: true})
 type LinearGradient struct {
@@ -509,6 +519,67 @@ type LinearGradient struct {
 	// the colors' lightness and saturation, instead of in sRGB, as CSS's
 	// "in oklab" does.
 	Oklab bool
+	// Stops, unless empty, are the gradient's colors in place of From and
+	// To (and Start and End), at their places along the line from 0 to 1,
+	// in order:
+	//
+	//	ui.LinearGradient{Angle: 90, Stops: []ui.GradientStop{{red, 0}, {yellow, 0.5}, {blue, 1}}}
+	Stops []GradientStop
+}
+
+// GradientStop is a color of a gradient (LinearGradient, ConicGradient)
+// and its place along it, from 0 to 1, as CSS's color stops are. The
+// gradient shows its first color before its first stop, its last after
+// its last, and between two stops their colors blended; two stops at one
+// place make a sharp edge. A gradient takes 32 stops at most, in sRGB.
+type GradientStop struct {
+	Color Color
+	At    float32
+}
+
+// ConicGradient blends colors around a point, as CSS's conic-gradient()
+// does (SwiftUI's AngularGradient, Flutter's SweepGradient): its stops at
+// their places around a turn, clockwise from its angle.
+//
+//	e.ConicGradient(ui.ConicGradient{Stops: []ui.GradientStop{{red, 0}, {blue, 0.5}, {red, 1}}})
+type ConicGradient struct {
+	Stops []GradientStop
+	// Center is the point the colors turn around, in fractions of the
+	// box's width and height from its top left corner; the zero Point is
+	// its middle.
+	Center Point
+	// Angle is where the turn starts, in degrees clockwise from upwards, as
+	// CSS's "from": 90 starts at the right, where SwiftUI's and Flutter's
+	// start.
+	Angle float32
+	// Oklab mixes the colors in the Oklab color space, as LinearGradient's
+	// does.
+	Oklab bool
+}
+
+// gradients is a conic fill and a border's gradient, linear or conic.
+type gradients struct {
+	conic        ConicGradient
+	borderLinear LinearGradient
+	borderConic  ConicGradient
+	border       borderPaint
+}
+
+// borderPaint is what paints a border: its color, or a gradient.
+type borderPaint uint8
+
+const (
+	borderColor borderPaint = iota
+	borderLinear
+	borderConic
+)
+
+// grad returns the element's gradients, made the first time.
+func (e *node) gradients() *gradients {
+	if e.grads == nil {
+		e.grads = &gradients{}
+	}
+	return e.grads
 }
 
 type fillKind uint8
@@ -518,6 +589,7 @@ const (
 	fillGradient
 	fillStripes
 	fillMaterial
+	fillConic
 )
 
 type stripes struct {
@@ -882,7 +954,7 @@ func (e *node) Debug() *node { e.flags |= flagDebug; return e }
 // Background fills the element, in place of a gradient.
 func (e *node) Background(c Color) *node {
 	e.bg = c
-	if e.fill == fillGradient {
+	if e.fill == fillGradient || e.fill == fillConic {
 		e.fill = fillColor
 	}
 	return e
@@ -901,6 +973,44 @@ func (e *node) LinearGradient(g LinearGradient) *node {
 	e.grad, e.fill = g, fillGradient
 	return e
 }
+
+// ConicGradient fills the element with a conic gradient, its colors
+// turning around a point (CSS's conic-gradient()):
+//
+//	ui.Box(c).Size(80, 80).Radius(40).ConicGradient(ui.ConicGradient{
+//		Stops: []ui.GradientStop{{red, 0}, {yellow, 1.0 / 3}, {blue, 2.0 / 3}, {red, 1}},
+//	})
+func (e *node) ConicGradient(g ConicGradient) *node {
+	e.gradients().conic, e.fill = g, fillConic
+	return e
+}
+
+// BorderLinearGradient paints the element's border (Border, BorderWidth)
+// with a linear gradient across the element, in place of its color.
+func (e *node) BorderLinearGradient(g LinearGradient) *node {
+	gr := e.gradients()
+	gr.borderLinear, gr.border = g, borderLinear
+	return e
+}
+
+// BorderConicGradient paints the element's border (Border, BorderWidth)
+// with a conic gradient around the element, in place of its color: a ring
+// of colors, as SwiftUI's strokeBorder with an AngularGradient draws.
+//
+//	ui.Box(c).Size(120, 80).Radius(16).Border(4, ui.Color{}).BorderConicGradient(ui.ConicGradient{Stops: rainbow})
+func (e *node) BorderConicGradient(g ConicGradient) *node {
+	gr := e.gradients()
+	gr.borderConic, gr.border = g, borderConic
+	return e
+}
+
+// Blur blurs the element, with its children, by sigma DIPs, the standard
+// deviation of a Gaussian, as CSS's filter: blur() does: what it draws
+// spreads that far around, transparent beyond, on the GPU. It renders
+// into a bitmap first, as Effect does, about 3 sigma larger each way, and
+// an element with an Effect draws through it instead. Hit testing, focus
+// and accessibility do not change: only what shows.
+func (e *node) Blur(sigma float32) *node { e.blur = max(sigma, 0); return e }
 
 // Stripes draws stripes of c over the background, width DIPs wide with
 // gap DIPs between them, running at angle degrees clockwise from upwards:

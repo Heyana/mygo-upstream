@@ -156,6 +156,17 @@ if start, _ := input.TextSelection(); app.completed != "" {
 }
 ```
 
+`TextSelection` returns the selection in order. `TextAnchorCaret` returns
+it from where it was started to its caret, so an app can tell a selection
+made backwards from one made forwards: an editor's own keys that extend a
+selection, such as Shift-Home moving to the first character of the line,
+extend it from its anchor:
+
+```go
+anchor, caret := input.TextAnchorCaret()
+input.SetTextSelection(anchor, lineStart(app.draft, caret))
+```
+
 ## Beside the lines
 
 `TrackLines` keeps in a `ui.TextLines` where a text area lays out the lines

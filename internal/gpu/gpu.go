@@ -96,6 +96,11 @@ type Instance struct {
 	Transform0, Transform1, Transform2 [4]float32
 }
 
+// BackdropImage is the image of a shader of package ui/shader that holds
+// its backdrop, when it reads it (internal/shader.BackdropImage):
+// renderers bind their backdrop's texture in its place.
+const BackdropImage = 2
+
 // InstanceSize is the size of an Instance in bytes.
 const InstanceSize = int(unsafe.Sizeof(Instance{}))
 
@@ -121,6 +126,13 @@ type Batch struct {
 	// drawing it.
 	Effect   *scene.Effect
 	Backdrop int
+	// Shader is the effect's op, for a shader's (Effect.Shader), and
+	// Textures the renderer's textures of its images, 0 for none.
+	Shader   *scene.EffectOp
+	Textures [4]uintptr
+	// Uniforms are the words of the shader's uniforms the batch draws
+	// with: the op's, or its wide ones for a wide gamut (Wide).
+	Uniforms []uint32
 	// Hole tells that the batch's instances make their shapes transparent
 	// (scene.OpHole): renderers blend them with a source factor of zero.
 	Hole bool
@@ -207,6 +219,19 @@ type Builder struct {
 	Instances []Instance
 	Batches   []Batch
 	Backdrops []scene.Backdrop
+	// Stops holds the stops of the gradients the instances draw with
+	// (scene.Stop), two RGBA texels of 32-bit floats each, StopsWidth to
+	// a row: the color, straight sRGB, then its place and its color in
+	// Oklab. An instance painting with stops has the first's index and
+	// how many in Color2.
+	Stops []float32
+	// BlurredImage, unless nil, returns the texture of an image's area
+	// blurred as bk says (scene.ImageBlur), bk.Size() texels, rows going
+	// down, which the renderer computes before the frame's pass: the
+	// image's texture averaged over squares, blurred along rows and along
+	// columns (ImageDownPass, ImageBlurPass). Without it, images draw
+	// unblurred.
+	BlurredImage func(img *scene.Image, bk scene.Backdrop) uintptr
 	// Wide draws the colors of scenes outside the sRGB gamut
 	// (Scene.Wide), for a target that keeps them, as Metal's float16
 	// drawables do; without it, their nearest sRGB colors.
@@ -268,8 +293,43 @@ type Builder struct {
 type Pass struct {
 	Origin, Limit, Shift, Dir [2]int32
 	Down, Radius              int32
-	Sigma, _                  float32
+	Sigma                     float32
+	// Mode is PassClear for passes reading an image to blur (scene.Op's
+	// Blur), and PassUnflipped for those of OpenGL reading an image whose
+	// rows go down.
+	Mode int32
 }
+
+// Modes of passes (Pass.Mode).
+const (
+	// PassClear reads what lies beyond the area (down) or the texels
+	// (blur) as transparent, where it would repeat the last ones.
+	PassClear = 1 << iota
+	// PassUnflipped tells OpenGL's pass down that its source's rows go
+	// down, as an image uploaded: its row y is y less Shift.y.
+	PassUnflipped
+)
+
+// ImageDownPass returns the pass averaging the squares of an image's
+// area that bk blurs (scene.ImageBlur), reading its texture's texels
+// where they are, transparent beyond the area.
+func ImageDownPass(bk scene.Backdrop) Pass {
+	p := DownPass(bk, [2]int32{})
+	p.Mode = PassClear
+	return p
+}
+
+// ImageBlurPass returns the pass blurring the texels of an image's blur
+// along rows (dir 1, 0) or columns (0, 1), transparent beyond them.
+func ImageBlurPass(bk scene.Backdrop, dir [2]int32) Pass {
+	p := BlurPass(bk, dir)
+	p.Mode = PassClear
+	return p
+}
+
+// StopsWidth is how many texels a row of the texture of a frame's stops
+// holds (Builder.Stops).
+const StopsWidth = 1024
 
 // DownPass returns the pass averaging the squares of bk's area, whose
 // frame pixel (x, y) is at (x, y) less shift in the texture it reads.
@@ -345,6 +405,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 	b.Instances = b.Instances[:0]
 	b.Batches = b.Batches[:0]
 	b.Backdrops = b.Backdrops[:0]
+	b.Stops = b.Stops[:0]
 	b.OpaqueCores = 0
 	everything := scene.Rect{X: -1e6, Y: -1e6, W: 2e6, H: 2e6}
 	b.stack = append(b.stack[:0], clip{rect: everything, bounds: scene.Rect{W: float32(s.Width), H: float32(s.Height)},
@@ -386,10 +447,18 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			if op.Dashed {
 				dashed = 1
 			}
+			if op.BorderPaint {
+				// Its gradient paints the border.
+				dashed += 2
+			}
 			w := b.wideOf(s, op.Wide)
+			c2 := wideColor(w, scene.WideColor2, op.Color2)
+			if op.Paint.HasStops() {
+				c2 = b.addStops(s, op)
+			}
 			b.addFill(s, Instance{
 				Rect: rect(op.Rect), Radii: radii, Inner: inner,
-				Color: wideColor(w, scene.WideColor, op.Color), Color2: wideColor(w, scene.WideColor2, op.Color2), Border: wideColor(w, scene.WideBorder, op.BorderColor), Grad: op.Gradient,
+				Color: wideColor(w, scene.WideColor, op.Color), Color2: c2, Border: wideColor(w, scene.WideBorder, op.BorderColor), Grad: op.Gradient,
 				UV:     bw,
 				Params: [4]float32{0, dashed, float32(op.Paint), opacity(op.Opacity)},
 			}, op)
@@ -430,11 +499,14 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			}
 			b.addShadow(in, op, sigma)
 		case scene.OpGlyphs:
-			grad := op.Paint == scene.PaintLinear || op.Paint == scene.PaintOklab
+			grad := op.Paint == scene.PaintLinear || op.Paint == scene.PaintOklab || op.Paint.HasStops()
 			var c1, c2 [4]float32
 			if grad {
 				w := b.wideOf(s, op.Wide)
 				c1, c2 = wideColor(w, scene.WideColor, op.Color), wideColor(w, scene.WideColor2, op.Color2)
+				if op.Paint.HasStops() {
+					c2 = b.addStops(s, op)
+				}
 			}
 			for _, g := range s.Glyphs[op.Start:op.End] {
 				a, kind, contrast := s.MaskAtlas, float32(2), s.Text.Contrast
@@ -482,11 +554,24 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 			if img == nil || op.Rect.Empty() || img.W == 0 || img.H == 0 {
 				continue
 			}
-			tex := image(img)
+			src := op.Src
+			iw, ih := float32(img.W), float32(img.H)
+			var tex uintptr
+			if op.Blur > 0 && b.BlurredImage != nil {
+				// The image's area blurred, which the op samples.
+				bk := scene.ImageBlur(scene.ImageArea(op.Src, img.W, img.H), op.Blur)
+				w, h := bk.Size()
+				if w <= 0 || h <= 0 {
+					continue
+				}
+				tex = b.BlurredImage(img, bk)
+				src, iw, ih = bk.ImageSrc(op.Src), float32(w), float32(h)
+			} else {
+				tex = image(img)
+			}
 			if tex == 0 {
 				continue
 			}
-			iw, ih := float32(img.W), float32(img.H)
 			gray, nearest := float32(0), float32(0)
 			if op.Grayscale {
 				gray = 1
@@ -502,7 +587,7 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 				Rect:   rect(op.Rect),
 				Radii:  scene.Corners(op.Rect, op.Radii, op.Continuous),
 				Color:  tint,
-				UV:     [4]float32{op.Src.X / iw, op.Src.Y / ih, (op.Src.X + op.Src.W) / iw, (op.Src.Y + op.Src.H) / ih},
+				UV:     [4]float32{src.X / iw, src.Y / ih, (src.X + src.W) / iw, (src.Y + src.H) / ih},
 				Params: [4]float32{4, gray, nearest, opacity(op.Opacity)},
 			}, tex, op.Transform)
 		}
@@ -511,6 +596,35 @@ func (b *Builder) Build(s *scene.Scene, image func(*scene.Image) uintptr) *scene
 	b.dropIdleMasks(idleMaskBytes)
 	b.imageTexture = nil
 	return s
+}
+
+// addStops adds the stops of op's gradient to b.Stops, at most
+// scene.MaxStops of them, and returns the instance's Color2 pointing at
+// them: the first's index and how many.
+func (b *Builder) addStops(s *scene.Scene, op *scene.Op) [4]float32 {
+	a, e := int(op.Stops[0]), int(op.Stops[1])
+	if a < 0 || e > len(s.Stops) || a >= e {
+		return [4]float32{}
+	}
+	e = min(e, a+scene.MaxStops)
+	first := len(b.Stops) / 8
+	for _, st := range s.Stops[a:e] {
+		lab := scene.Oklab(st.Color)
+		c := st.Color
+		b.Stops = append(b.Stops, float32(c.R)/255, float32(c.G)/255, float32(c.B)/255, float32(c.A)/255,
+			st.At, lab[0], lab[1], lab[2])
+	}
+	return [4]float32{float32(first), float32(e - a), 0, 0}
+}
+
+// StopsSize returns how large the texture of the frame's stops must be,
+// in texels, for Stops: StopsWidth across, or 0 by 0 for none.
+func (b *Builder) StopsSize() (w, h int) {
+	n := len(b.Stops) / 4
+	if n == 0 {
+		return 0, 0
+	}
+	return StopsWidth, (n + StopsWidth - 1) / StopsWidth
 }
 
 // markEnclosing sets b.encloses for the ops of s.
@@ -805,6 +919,10 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 		return
 	}
 	fx := &s.Effects[op.Start]
+	if fx.Masked() {
+		b.addMaskedEffect(s, op, fx, cur)
+		return
+	}
 	p := &fx.Params
 	in := Instance{
 		Rect: rect(op.Rect), Radii: scene.Corners(op.Rect, op.Radii, op.Continuous),
@@ -816,6 +934,14 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 		return
 	}
 	batch := Batch{Start: len(b.Instances), Count: 1, Scissor: cur.scissor, Effect: fx.Effect, ClipMask: b.preparedMask}
+	if fx.Effect.Shader != nil {
+		batch.Shader, batch.Uniforms = fx, b.uniformsOf(fx)
+		for i, img := range fx.Images {
+			if img != nil && img.W > 0 && img.H > 0 && b.imageTexture != nil {
+				batch.Textures[i] = b.imageTexture(img)
+			}
+		}
+	}
 	if fx.Effect.Backdrop {
 		bk := scene.BackdropOf(op.Transform.Bounds(op.Rect), fx.Blur, s.Width, s.Height)
 		if bk.Area.Empty() {
@@ -829,6 +955,62 @@ func (b *Builder) addEffect(s *scene.Scene, op *scene.Op) {
 	}
 	b.Batches = append(b.Batches, batch)
 	b.Instances = append(b.Instances, in)
+}
+
+// addMaskedEffect appends the instances of a shader's effect filling mask
+// glyphs (scene.EffectOp.Glyphs), in a batch of their own: each glyph's,
+// as OpGlyphs has it, with 1 in Params[1], and the point the shader's
+// positions start from in Grad.
+func (b *Builder) addMaskedEffect(s *scene.Scene, op *scene.Op, fx *scene.EffectOp, cur *clip) {
+	a := s.MaskAtlas
+	if a == nil || fx.Effect.Shader == nil || fx.Effect.Backdrop {
+		return
+	}
+	batch := Batch{Start: len(b.Instances), Scissor: cur.scissor, Effect: fx.Effect, Shader: fx, Uniforms: b.uniformsOf(fx)}
+	for i, img := range fx.Images {
+		if img != nil && img.W > 0 && img.H > 0 && b.imageTexture != nil {
+			batch.Textures[i] = b.imageTexture(img)
+		}
+	}
+	aw, ah := float32(a.W), float32(a.H)
+	first := true
+	for _, g := range s.Glyphs[fx.Glyphs[0]:fx.Glyphs[1]] {
+		if g.Colored || g.Subpixel {
+			continue
+		}
+		boost := float32(0)
+		if g.Thin {
+			boost = scene.ThinBoost
+		}
+		in := Instance{
+			Rect:   [4]float32{float32(math.Round(float64(g.X))), float32(math.Round(float64(g.Y))), float32(g.UW), float32(g.VH)},
+			Radii:  s.Text.GammaRatios,
+			Inner:  [4]float32{s.Text.Contrast, boost},
+			UV:     [4]float32{float32(g.U) / aw, float32(g.V) / ah, float32(g.U+g.UW) / aw, float32(g.V+g.VH) / ah},
+			Grad:   [4]float32{fx.Origin[0], fx.Origin[1], 1, 0},
+			Params: [4]float32{6, 1, 0, opacity(op.Opacity)},
+		}
+		if !b.prepare(&in, op.Transform.Mul(g.Transform), cur) {
+			continue
+		}
+		if first {
+			batch.ClipMask, first = b.preparedMask, false
+		}
+		b.Instances = append(b.Instances, in)
+		batch.Count++
+	}
+	if batch.Count > 0 {
+		b.Batches = append(b.Batches, batch)
+	}
+}
+
+// uniformsOf returns the words of fx's uniforms to draw with: its wide
+// ones, for a wide gamut, when it has them.
+func (b *Builder) uniformsOf(fx *scene.EffectOp) []uint32 {
+	if b.Wide && fx.WideUniforms != nil {
+		return fx.WideUniforms
+	}
+	return fx.Uniforms
 }
 
 // addHole appends a hole within the current clip, in a batch of holes:
