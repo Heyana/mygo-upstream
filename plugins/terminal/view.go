@@ -1023,9 +1023,9 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 		v.touchSelecting = true
 	}
 	tracking := !v.touchSelecting && v.screen().MouseTracking() && ev.Mods&ui.Shift == 0
-	// Alternate-screen programs own history outside the terminal grid. Honor
-	// their mouse protocol so selection can scroll that application history.
-	localDrag := t.opts.SelectOnDrag && !v.screen().AltScreen()
+	// Preserve application-owned history unless the caller explicitly prefers
+	// local selection in full-screen programs, such as editors.
+	localDrag := t.opts.SelectOnDrag && (!v.screen().AltScreen() || t.opts.SelectOnDragInAltScreen)
 	preferDrag := localDrag && ev.Mods&ui.Alt == 0 && ev.Kind == ui.InputPointerDown && ev.Button == 0
 	if tracking && !v.selecting && !preferDrag || v.reporting {
 		return v.report(ev)

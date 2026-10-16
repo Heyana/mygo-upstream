@@ -360,6 +360,11 @@ within 8 DIPs of the viewport edge scrolls through history.
   tracks the mouse. Clicks and scrolling still reach it; Alt bypasses the
   override, Shift forces selection, and alternate-screen programs retain their
   mouse protocol. `SetSelectOnDrag` changes this policy.
+- `SelectOnDragInAltScreen` extends `SelectOnDrag` to full-screen programs such
+  as Vim. It selects the visible terminal cells; clicks, wheel scrolling and
+  Alt drags still reach the program. `SetSelectOnDragInAltScreen` switches the
+  override when the foreground program changes. Leave it off for applications
+  whose own selection needs to include history outside the visible grid.
 - `SendKey(ui.Key, ui.Modifiers)` encodes accessory keys through the program's
   keyboard protocol, including requested releases. Software modifiers attached
   with `Element.InputModifiers` use the same encoder. Software Command+C/V/A

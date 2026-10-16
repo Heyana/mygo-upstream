@@ -103,10 +103,15 @@ type Options struct {
 	// The default copies visible text; neither mode interprets Markdown.
 	CopyRawText bool
 	// SelectOnDrag lets the terminal select text when a primary-screen program
-	// tracks the mouse. Alternate-screen programs retain their mouse protocol
-	// and application-owned history. Plain clicks and the wheel still reach
-	// the program; Alt bypasses this override, and Shift forces local selection.
+	// tracks the mouse. Unless SelectOnDragInAltScreen is set, alternate-screen
+	// programs retain their mouse protocol and application-owned history.
+	// Plain clicks and the wheel still reach the program; Alt bypasses this
+	// override, and Shift forces local selection.
 	SelectOnDrag bool
+	// SelectOnDragInAltScreen extends SelectOnDrag to alternate-screen programs
+	// such as editors. Selection copies only the visible grid; the program still
+	// receives clicks, the wheel and Alt drags. It has no effect without SelectOnDrag.
+	SelectOnDragInAltScreen bool
 	// OpenLinksOnTap opens links on an unmodified primary tap, without
 	// requiring Command/Control. It is useful for touch terminals. Opening
 	// waits for release; moving, cancellation and long-press selection do
@@ -951,6 +956,14 @@ func (t *Terminal) SetCopyRawText(raw bool) {
 func (t *Terminal) SetSelectOnDrag(selectOnDrag bool) {
 	t.mu.Lock()
 	t.opts.SelectOnDrag = selectOnDrag
+	t.mu.Unlock()
+}
+
+// SetSelectOnDragInAltScreen changes whether SelectOnDrag includes full-screen
+// programs, without restarting the session.
+func (t *Terminal) SetSelectOnDragInAltScreen(selectOnDrag bool) {
+	t.mu.Lock()
+	t.opts.SelectOnDragInAltScreen = selectOnDrag
 	t.mu.Unlock()
 }
 
