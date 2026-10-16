@@ -4,7 +4,7 @@ import (
 	"slices"
 	"unicode"
 
-	"github.com/go-text/typesetting/segmenter"
+	"github.com/Heyana/typesetting-go/segmenter"
 )
 
 // Rect is a rectangle in DIPs relative to the layout.

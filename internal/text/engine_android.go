@@ -26,10 +26,11 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/go-text/typesetting/di"
-	"github.com/go-text/typesetting/font"
-	ot "github.com/go-text/typesetting/font/opentype"
-	"github.com/go-text/typesetting/shaping"
+	"github.com/egoist/mygo/internal/probe"
+	"github.com/Heyana/typesetting-go/di"
+	"github.com/Heyana/typesetting-go/font"
+	ot "github.com/Heyana/typesetting-go/font/opentype"
+	"github.com/Heyana/typesetting-go/shaping"
 	"golang.org/x/image/math/fixed"
 	"golang.org/x/image/vector"
 
@@ -57,7 +58,7 @@ func newEngine() engine { return newAndroidEngine() }
 type androidEngine struct {
 	shapeScratch
 
-	shaper  shaping.HarfbuzzShaper
+	shaper  shaping.Shaper
 	segment shaping.Segmenter
 	wrap    shaping.LineWrapper
 
@@ -74,6 +75,10 @@ type androidEngine struct {
 	faceIndex map[*font.Face]int
 	// styleFaces is the face each style's families resolve to.
 	styleFaces map[androidStyleKey]int
+	// variants is the VF variant face shell per (base face, wght) — light
+	// shells (Font pointer + coords) that carry the weight into both the
+	// shaper and the rasterizer.
+	variants map[androidVariantKey]int
 	// fallbacks is the face that covers a rune a style's own font lacks.
 	fallbacks map[androidFallbackKey]int
 	// app are the faces of the fonts the app added, by family.
@@ -120,6 +125,12 @@ type androidFont struct {
 
 // androidSystemFont is a font Android has: the file it lives in, its place
 // in the file, and the weight and italic the file's font declares.
+// androidVariantKey 是一个 VF 变体 face 壳：基础 face 索引 + wght。
+type androidVariantKey struct {
+	base int
+	wght int
+}
+
 type androidSystemFont struct {
 	file   string
 	index  int
@@ -129,11 +140,16 @@ type androidSystemFont struct {
 
 func newAndroidEngine() *androidEngine {
 	return &androidEngine{
+		// 🔴 shaper 用 C HarfBuzz（CHBShaper，2026-10-15）：Go 移植的
+		// per-Face Font 解析并保留表结构，被布局缓存引用后 ~10-15MB
+		// 常驻；C HB mmap 现读零保留。注册点在 readFile / RegisterFont。
+		shaper:     shaping.NewCHBShaper(),
 		fonts:      map[androidFontKey]*Font{},
 		index:      map[androidFileKey]int{},
 		fileFaces:  map[string][]*font.Face{},
 		faceIndex:  map[*font.Face]int{},
 		styleFaces: map[androidStyleKey]int{},
+		variants:   map[androidVariantKey]int{},
 		fallbacks:  map[androidFallbackKey]int{},
 		app:        map[string][]int{},
 	}
@@ -162,14 +178,18 @@ func (e *androidEngine) readFile(path string, index int) (int, bool) {
 	if i, ok := e.index[key]; ok {
 		return i, i >= 0
 	}
+	var data []byte
 	faces, ok := e.fileFaces[path]
 	if !ok {
-		faces = parseFontFile(path)
+		faces, data = parseFontFile(path)
 		e.fileFaces[path] = faces
 	}
 	i := -1
 	if index >= 0 && index < len(faces) {
 		i = e.addFace(faces[index])
+	}
+	if chb, ok := e.shaper.(*shaping.CHBShaper); ok && i >= 0 {
+		chb.RegisterFace(faces[index], data, index)
 	}
 	e.index[key] = i
 	return i, i >= 0
@@ -193,34 +213,40 @@ func (e *androidEngine) readFile(path string, index int) (int, bool) {
 //
 // A file that cannot be mapped (SELinux, a path that is not a regular file)
 // is read instead, which still works and costs what it always did.
-func parseFontFile(path string) []*font.Face {
+func parseFontFile(path string) ([]*font.Face, []byte) {
 	read := func(data []byte) []*font.Face {
-		if f, err := font.ParseTTF(bytes.NewReader(data)); err == nil {
+		// 🔴 ByteSource 而非 bytes.Reader（2026-10-15）：字节背衬让
+		// Loader 的表访问零拷贝（表切片直接指进 data/mmap），否则每张
+		// 表被 ReadAt 再拷一份常驻（实测 7.3MB）。
+		if f, err := font.ParseTTF(ot.NewByteSource(data)); err == nil {
 			return []*font.Face{f}
 		}
-		if faces, err := font.ParseTTC(bytes.NewReader(data)); err == nil {
+		if faces, err := font.ParseTTC(ot.NewByteSource(data)); err == nil {
 			return faces
 		}
 		return nil
 	}
-	if false {
-		if data, err := mapFile(path); err == nil {
-			return read(data)
-		}
+	// 🔴 mmap 优先（2026-10-15）：原来被 if false 硬禁用，32MB 的系统
+	// CJK 字体走 os.ReadFile 全量进堆（profile：os.readFileContents
+	// 22MB/50MB）。映射不是堆：内核按触碰给页、压力下可收回，face 的
+	// 成本变成工作集而非整个文件。映射失败（SELinux 等）回退 ReadFile。
+	if data, err := mapFile(path); err == nil {
+		return read(data), data
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return read(data)
+	return read(data), data
 }
 
 // parseFontData parses font bytes the app added.
 func parseFontData(data []byte) []*font.Face {
-	if f, err := font.ParseTTF(bytes.NewReader(data)); err == nil {
+	// 🔴 ByteSource：同 parseFontFile，表零拷贝指进 data。
+	if f, err := font.ParseTTF(ot.NewByteSource(data)); err == nil {
 		return []*font.Face{f}
 	}
-	if faces, err := font.ParseTTC(bytes.NewReader(data)); err == nil {
+	if faces, err := font.ParseTTC(ot.NewByteSource(data)); err == nil {
 		return faces
 	}
 	return nil
@@ -460,10 +486,39 @@ func (e *androidEngine) faceForStyle(style Style) int {
 		return i
 	}
 	i := e.findFace(style.Family, style.weight(), style.Italic)
+	if i >= 0 {
+		i = e.variantFaceFor(i, style.weight())
+	}
 	if len(e.styleFaces) >= 1024 {
 		clear(e.styleFaces)
 	}
 	e.styleFaces[key] = i
+	return i
+}
+
+// variantFaceFor returns the index of a face whose variable coordinates
+// are set to the given wght, instantiating a light face shell per weight
+// when the base face is a variable font whose default weight differs.
+// 🔴 VF 的多字重此前从未生效（2026-10-15）：face 选择按字重匹配文件，
+// 但 VF 单文件的 wght 轴从未被设——shape 与光栅化都是默认实例。
+// 壳只持 Font 指针 + 坐标切片，光栅化（GlyphDataOutline → gvar deltas）
+// 与 shaper 的 hb_font（按 VarWght）都以它为准。静态字体原样返回。
+func (e *androidEngine) variantFaceFor(base int, wght int) int {
+	af := e.faceAt(base)
+	if af == nil || wght == 0 || wght == 400 || !af.face.Font.HasVariations() {
+		return base
+	}
+	key := androidVariantKey{base, wght}
+	if i, ok := e.variants[key]; ok {
+		return i
+	}
+	shell := font.NewFace(af.face.Font)
+	shell.SetVariations([]font.Variation{{Tag: ot.MustNewTag("wght"), Value: float32(wght)}})
+	i := e.addFace(shell)
+	if len(e.variants) >= 256 {
+		clear(e.variants)
+	}
+	e.variants[key] = i
 	return i
 }
 
@@ -654,15 +709,28 @@ func (e *androidEngine) shape(text []rune, style Style, spans []Span, width floa
 			Direction:    dir,
 			Size:         fixed.Int26_6(st.FontSize()*64 + 0.5),
 			FontFeatures: shapingFeatures(st.Features),
+			// 🔴 VF 的 wght 轴（2026-10-15）：face 壳负责光栅化坐标
+			//（faceForStyle 建），shaper 的 hb_font 按它设变体——此前
+			// VF 的多字重从未生效（medium/semibold 渲染为 400）。
+			VarWght: st.weight(),
 		}
 		fm := androidFontmap{e: e, family: st.Family, face: int(f.native), weight: st.weight(), italic: st.Italic}
+		segEnd := probe.Span("text/segment")
 		for _, piece := range e.segment.Split(in, fm) {
+			// Shaping is the piece of layout that a faster engine would
+			// replace, so it is timed apart from the segmentation and the
+			// wrapping that surround it: leaf.textLayout's total says the
+			// work is there, this says how much of it a different shaper
+			// could take.
+			shapeEnd := probe.Span("text/shape")
 			out := e.shaper.Shape(piece)
+			shapeEnd()
 			if sp := fixed.Int26_6(st.LetterSpacing*64 + 0.5); sp != 0 {
 				spaceOut(&out, sp)
 			}
 			outs = append(outs, out)
 		}
+		segEnd()
 		start = end
 	}
 	if len(outs) == 0 {
@@ -677,7 +745,9 @@ func (e *androidEngine) shape(text []rune, style Style, spans []Span, width floa
 		maxWidth = fixed.Int26_6(width*64 + 0.5)
 	}
 	config := shaping.WrapConfig{Direction: dir, BreakPolicy: policy, DisableTrailingWhitespaceTrim: true}
+	wrapEnd := probe.Span("text/wrap")
 	lines, _ := e.wrap.WrapParagraphF(config, maxWidth, text, shaping.NewSliceIterator(outs))
+	wrapEnd()
 
 	out := make([]shapedLine, 0, len(lines))
 	order := make([]int, 0, len(outs))
@@ -838,6 +908,83 @@ func (e *androidEngine) join() bool { return false }
 // textParams leaves coverage as it is, without subpixel antialiasing.
 func (e *androidEngine) textParams() (scene.TextParams, bool) { return scene.TextParams{}, false }
 
+// appFamilies lists the families the app registered (RegisterFont), each
+// with whether its regular face is monospaced.
+//
+// Monospaced is read off the face's own metrics rather than guessed from
+// the name: a family called "mono" that is not, or one that is but is not
+// called so, both come out right this way. Measuring "i" against "W" is
+// what the browser engine does and it needs a real layout; the metrics are
+// already parsed here.
+func (e *androidEngine) appFamilies() []FontFamily {
+	if len(e.app) == 0 {
+		return nil
+	}
+	out := make([]FontFamily, 0, len(e.app))
+	for name, faces := range e.app {
+		if len(faces) == 0 {
+			continue
+		}
+		out = append(out, FontFamily{Name: name, Monospaced: e.monospaced(faces[0])})
+	}
+	return out
+}
+
+// monospaced reports whether face i's regular font gives every character
+// the same advance, which is what FontFamily.Monospaced means.
+//
+// Read off the face's own tables, and at the font's own scale — the
+// comparison is a ratio, so the size cancels. A glyph the face does not
+// have falls back to .notdef, whose advance is not a statement about the
+// spacing, so the check is skipped rather than answered wrongly.
+func (e *androidEngine) monospaced(i int) bool {
+	if i < 0 || i >= len(e.faces) {
+		return false
+	}
+	face := e.faces[i].face
+	if face == nil {
+		return false
+	}
+	gi, okI := face.NominalGlyph('i')
+	gw, okW := face.NominalGlyph('W')
+	if !okI || !okW {
+		return false
+	}
+	return face.HorizontalAdvance(gi) == face.HorizontalAdvance(gw)
+}
+
+// systemFamilies lists the families of Android's own fonts, without the
+// app's. It enumerates the system fonts on first use (systemFonts) and
+// reads each file's name table once (familyOfFile) — the same two calls
+// the matcher makes, so the list costs no more than a lookup.
+//
+// The returned function runs without a lock on any goroutine, as the
+// contract says; Android's matcher holds no state this touches.
+func (e *androidEngine) systemFamilies() func() []FontFamily {
+	fonts := e.systemFonts()
+	if len(fonts) == 0 {
+		return nil
+	}
+	app := map[string]bool{}
+	for name := range e.app {
+		app[name] = true
+	}
+	seen := map[string]bool{}
+	var out []FontFamily
+	for _, sf := range fonts {
+		name := strings.ToLower(e.familyOfFile(sf.file))
+		if name == "" || app[name] || seen[name] {
+			continue
+		}
+		seen[name] = true
+		// Whether a system family is monospaced is not read here: that
+		// needs the file parsed, and the list is asked for before any
+		// text is laid out. A caller that needs it has the face.
+		out = append(out, FontFamily{Name: name})
+	}
+	return func() []FontFamily { return out }
+}
+
 // decorate places underlines and strikethroughs along the advances of the
 // runs, at the positions and thicknesses of their fonts, whole pixels from
 // the baseline.
@@ -872,6 +1019,11 @@ func (e *androidEngine) register(data []byte, family string) error {
 	faces := parseFontData(data)
 	if len(faces) == 0 {
 		return errors.New("mygo: this font is not one the text engine reads")
+	}
+	if chb, ok := e.shaper.(*shaping.CHBShaper); ok {
+		for i, f := range faces {
+			chb.RegisterFace(f, data, i)
+		}
 	}
 	if family == "" {
 		seen := map[string]bool{}

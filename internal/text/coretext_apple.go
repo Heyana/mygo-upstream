@@ -18,7 +18,7 @@ import (
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 	"github.com/egoist/mygo/internal/scene"
-	"github.com/go-text/typesetting/segmenter"
+	"github.com/Heyana/typesetting-go/segmenter"
 )
 
 // Core Text lays out paragraphs: a typesetter finds the fonts, falls back

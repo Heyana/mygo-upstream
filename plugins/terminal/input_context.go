@@ -4,9 +4,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Heyana/typesetting-go/segmenter"
 	"github.com/egoist/mygo/plugins/terminal/internal/vt"
 	"github.com/egoist/mygo/ui"
-	"github.com/go-text/typesetting/segmenter"
 )
 
 // inputContext mirrors only locally typed, unsubmitted text. The remote
@@ -183,11 +183,20 @@ func (v *view) replaceInput(ev ui.InputEvent) {
 // InsertNewline inserts a line break without sending an unmodified Return.
 // It uses bracketed paste when the program enables it;
 // Alt+Return is the fallback when the program has not enabled paste mode.
+//
+// 🔴 两条路径都要把换行镜像进 inputContext。非 paste 那条走 SendKey →
+// contextKey，`key == KeyEnter && mods == Alt` 已经处理；paste 这条走
+// Paste，而 Paste 是通用剪贴板粘贴 —— 它不该碰 IME 的本地缓冲（粘贴进来的
+// 东西不是"本地敲的"），所以这一条得自己写。
+//
+// 漏了它的症状：输入框里换行不显示，但远端收到了 —— 本地看到的和发出去的
+// 不是同一份文本。TestTerminalNativeContextEditsLiveInput 守的就是这条。
 func (t *Terminal) InsertNewline() {
 	t.mu.Lock()
 	paste := t.term != nil && t.term.Mode(vt.ModeBracketedPaste)
 	t.mu.Unlock()
 	if paste {
+		t.contextText("\n")
 		t.Paste("\n")
 	} else {
 		t.SendKey(ui.KeyEnter, ui.Alt)

@@ -10,8 +10,8 @@ import (
 	"syscall/js"
 	"unicode"
 
-	"github.com/go-text/typesetting/bidi"
-	"github.com/go-text/typesetting/segmenter"
+	"github.com/Heyana/typesetting-go/bidi"
+	"github.com/Heyana/typesetting-go/segmenter"
 
 	"github.com/egoist/mygo/internal/scene"
 )
@@ -563,112 +563,23 @@ func reorder(cs []cluster, rtl bool) []cluster {
 // Canvases draw no text unsmoothed: Flat is drawn as the darkest shade.
 var shadeGray = [...]uint8{0, 137, 188, 225, 255, 0}
 
-// glyph draws a glyph's text in the gray of its shade and reads its
-// coverage back: gray, or color for color fonts (emoji).
-func (e *canvasEngine) glyph(f *Font, id uint32, scale, dx float32, shade Shade, _ bool) bitmap {
-	if int(id) >= len(e.texts) || id == 0 {
-		return bitmap{}
-	}
-	text := e.texts[id]
-	if strings.TrimSpace(text) == "" {
-		return bitmap{}
-	}
-	// The font at the size text was measured at, the canvas scaled: at
-	// the pixels' size, the system's font may take another optical size
-	// (SF Pro Display rather than Text), whose glyphs the advances measured
-	// do not fit, as pages draw at the CSS size, scaled.
-	e.setFont(e.sized(f, f.Size))
-	m := e.ctx.Call("measureText", text)
-	s := float64(scale)
-	l, r := s*m.Get("actualBoundingBoxLeft").Float(), s*m.Get("actualBoundingBoxRight").Float()
-	a, d := s*m.Get("actualBoundingBoxAscent").Float(), s*m.Get("actualBoundingBoxDescent").Float()
-	const pad = 1
-	left := int(math.Floor(-l+float64(dx))) - pad
-	right := int(math.Ceil(r+float64(dx))) + pad
-	top := int(math.Floor(-a)) - pad
-	bottom := int(math.Ceil(d)) + pad
-	w, h := right-left, bottom-top
-	if w <= 2*pad || h <= 2*pad || w > 2048 || h > 2048 {
-		return bitmap{}
-	}
-	if w > e.w || h > e.h {
-		e.w, e.h = max(w, e.w), max(h, e.h)
-		e.canvas.Set("width", e.w)
-		e.canvas.Set("height", e.h)
-		// A canvas resized forgets its state.
-		e.current = ""
-		e.setFont(e.sized(f, f.Size))
-		e.ctx.Set("textBaseline", "alphabetic")
-		e.ctx.Set("textAlign", "left")
-		e.fill = ""
-	}
-	gray := shadeGray[0]
-	if int(shade) < len(shadeGray) {
-		gray = shadeGray[shade]
-	}
-	if fill := "rgb(" + strconv.Itoa(int(gray)) + "," + strconv.Itoa(int(gray)) + "," + strconv.Itoa(int(gray)) + ")"; fill != e.fill {
-		e.fill = fill
-		e.ctx.Set("fillStyle", fill)
-	}
-	e.ctx.Call("clearRect", 0, 0, w, h)
-	e.ctx.Call("setTransform", s, 0, 0, s, 0, 0)
-	e.ctx.Call("fillText", text, (float64(dx)-float64(left))/s, -float64(top)/s)
-	e.ctx.Call("setTransform", 1, 0, 0, 1, 0, 0)
-	data := e.ctx.Call("getImageData", 0, 0, w, h).Get("data")
-	n := 4 * w * h
-	if cap(e.image) < n {
-		e.image = make([]byte, n)
-	}
-	px := e.image[:n]
-	js.CopyBytesToGo(px, data)
-	// The ink's box: measurements leave room around it.
-	x0, y0, x1, y1 := w, h, 0, 0
-	for y := range h {
-		for x := range w {
-			if px[4*(y*w+x)+3] != 0 {
-				x0, y0, x1, y1 = min(x0, x), min(y0, y), max(x1, x+1), max(y1, y+1)
-			}
-		}
-	}
-	if x0 >= x1 {
-		return bitmap{}
-	}
-	if x0 > 0 || y0 > 0 || x1 < w || y1 < h {
-		cw, ch := x1-x0, y1-y0
-		for y := range ch {
-			copy(px[4*y*cw:4*(y+1)*cw], px[4*((y+y0)*w+x0):4*((y+y0)*w+x1)])
-		}
-		left, top, w, h = left+x0, top+y0, cw, ch
-		n = 4 * w * h
-		px = px[:n]
-	}
-	// Gray text is its gray where it covers: the alpha is the coverage.
-	// Others are colored.
-	color := false
-	far := func(c uint8) bool { return int(c) > int(gray)+32 || int(gray) > int(c)+32 }
-	for i := 0; i < n; i += 4 {
-		if px[i+3] > 32 && (far(px[i]) || far(px[i+1]) || far(px[i+2])) {
-			color = true
-			break
-		}
-	}
-	bm := bitmap{left: left, top: top, w: w, h: h, color: color}
-	if color {
-		bm.pix = make([]byte, n)
-		for i := 0; i < n; i += 4 {
-			al := uint16(px[i+3])
-			bm.pix[i] = uint8((uint16(px[i])*al + 127) / 255)
-			bm.pix[i+1] = uint8((uint16(px[i+1])*al + 127) / 255)
-			bm.pix[i+2] = uint8((uint16(px[i+2])*al + 127) / 255)
-			bm.pix[i+3] = px[i+3]
-		}
-		return bm
-	}
-	bm.pix = make([]byte, w*h)
-	for i := range w * h {
-		bm.pix[i] = px[4*i+3]
-	}
-	return bm
+// glyph returns no bitmap on purpose.
+//
+// A scene's glyphs are coverage masks in an atlas that the software rasterizer
+// and the GPU renderers bind as a texture. This fork's canvas renderer draws
+// no text from there: it draws the runs of the text side channel with
+// ctx.fillText and skips the scene's text glyphs entirely (ui/gpu_js.go), so
+// the painter must not collect them (ui/paint.go skips a run whose GlyphImage
+// is not OK). Rasterizing a glyph here — drawing it into an offscreen canvas
+// and reading its pixels back — would cost a synchronous getImageData per
+// glyph, per subpixel position and per size, keep an entry for each in the
+// mask atlas, and fill the scene with glyphs no renderer reads.
+//
+// Upstream's canvas backend returns the bitmap here because upstream's own
+// canvas renderer draws text out of the atlas. Neither changes the layout:
+// what a glyph is measured at is shape()'s business, not this.
+func (e *canvasEngine) glyph(f *Font, id uint32, scale, dx float32, shade Shade, subpixel bool) bitmap {
+	return bitmap{}
 }
 
 // maxTexts is how many glyphs, texts, the engine keeps before it has the
