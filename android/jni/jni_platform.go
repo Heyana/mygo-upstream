@@ -56,6 +56,9 @@ static jmethodID mygo_mid_cancel = NULL;
 static jmethodID mygo_mid_cancel_all = NULL;
 static jmethodID mygo_mid_announce = NULL;
 static jmethodID mygo_mid_set_tree = NULL;
+static jmethodID mygo_mid_secret_set = NULL;
+static jmethodID mygo_mid_secret_get = NULL;
+static jmethodID mygo_mid_secret_delete = NULL;
 
 // mygo_platform_exception clears a pending Java exception and reports whether
 // there was one.
@@ -283,6 +286,80 @@ static jint mygo_platform_call_void(jmethodID mid, const char *data, int len) {
 
 // mygo_platform_call_two_bool calls writeClipboard(byte[] plain, byte[] html)
 // where either argument may be NULL (the representation is absent).
+// The secure store: secretSet(namespace, key, value, accessibility),
+// secretGet(namespace, key) -> byte[] or NULL, and delete. They are separate
+// wrappers rather than one shape because the return differs: two booleans, or
+// bytes. All three run the Android Keystore on the Java side, which may take
+// milliseconds on the first call — an unwrap — so their Go callers treat them
+// like any other native call and do not hold a lock across them.
+static jint mygo_platform_call_secret_set(jmethodID mid, const char *ns, int ns_len, const char *key, int key_len, const char *value, int value_len, int accessibility) {
+	JNIEnv *env = mygo_platform_env();
+	if (env == NULL || mygo_platform_obj == NULL || mid == NULL) {
+		return -1;
+	}
+	jbyteArray a = mygo_platform_arg(env, ns, ns_len);
+	jbyteArray b = mygo_platform_arg(env, key, key_len);
+	jbyteArray c = mygo_platform_arg(env, value, value_len);
+	if (a == NULL || b == NULL || c == NULL) {
+		if (a != NULL) (*env)->DeleteLocalRef(env, a);
+		if (b != NULL) (*env)->DeleteLocalRef(env, b);
+		if (c != NULL) (*env)->DeleteLocalRef(env, c);
+		return -1;
+	}
+	jboolean ok = (*env)->CallBooleanMethod(env, mygo_platform_obj, mid, a, b, c, (jint)accessibility);
+	(*env)->DeleteLocalRef(env, a);
+	(*env)->DeleteLocalRef(env, b);
+	(*env)->DeleteLocalRef(env, c);
+	if (mygo_platform_exception(env)) {
+		return -1;
+	}
+	return ok == JNI_TRUE ? 0 : 1;
+}
+static char *mygo_platform_call_secret_get(jmethodID mid, const char *ns, int ns_len, const char *key, int key_len, int *out_len) {
+	*out_len = 0;
+	JNIEnv *env = mygo_platform_env();
+	if (env == NULL || mygo_platform_obj == NULL || mid == NULL) {
+		return NULL;
+	}
+	jbyteArray a = mygo_platform_arg(env, ns, ns_len);
+	jbyteArray b = mygo_platform_arg(env, key, key_len);
+	if (a == NULL || b == NULL) {
+		if (a != NULL) (*env)->DeleteLocalRef(env, a);
+		if (b != NULL) (*env)->DeleteLocalRef(env, b);
+		return NULL;
+	}
+	jbyteArray r = (jbyteArray)(*env)->CallObjectMethod(env, mygo_platform_obj, mid, a, b);
+	(*env)->DeleteLocalRef(env, a);
+	(*env)->DeleteLocalRef(env, b);
+	if (mygo_platform_exception(env)) {
+		return NULL;
+	}
+	char *out = mygo_platform_grab(env, r, out_len);
+	if (r != NULL) {
+		(*env)->DeleteLocalRef(env, r);
+	}
+	return out;
+}
+static jint mygo_platform_call_secret_delete(jmethodID mid, const char *ns, int ns_len, const char *key, int key_len) {
+	JNIEnv *env = mygo_platform_env();
+	if (env == NULL || mygo_platform_obj == NULL || mid == NULL) {
+		return -1;
+	}
+	jbyteArray a = mygo_platform_arg(env, ns, ns_len);
+	jbyteArray b = mygo_platform_arg(env, key, key_len);
+	if (a == NULL || b == NULL) {
+		if (a != NULL) (*env)->DeleteLocalRef(env, a);
+		if (b != NULL) (*env)->DeleteLocalRef(env, b);
+		return -1;
+	}
+	jboolean ok = (*env)->CallBooleanMethod(env, mygo_platform_obj, mid, a, b);
+	(*env)->DeleteLocalRef(env, a);
+	(*env)->DeleteLocalRef(env, b);
+	if (mygo_platform_exception(env)) {
+		return -1;
+	}
+	return ok == JNI_TRUE ? 0 : 1;
+}
 static jint mygo_platform_call_two_bool(jmethodID mid, int has_one, const char *one, int one_len,
 	int has_two, const char *two, int two_len) {
 	JNIEnv *env = mygo_platform_env();
@@ -387,6 +464,9 @@ static jint mygo_platform_attach(JNIEnv *env, jobject thiz) {
 		{"cancelAllNotifications", "()Z", &mygo_mid_cancel_all},
 		{"announce", "([B)V", &mygo_mid_announce},
 		{"setAccessibilityTree", "([B)V", &mygo_mid_set_tree},
+		{"secretSet", "([B[B[BI)Z", &mygo_mid_secret_set},
+		{"secretGet", "([B[B)[B", &mygo_mid_secret_get},
+		{"secretDelete", "([B[B)Z", &mygo_mid_secret_delete},
 	};
 	int count = (int)(sizeof(lookups) / sizeof(lookups[0]));
 	for (int n = 0; n < count; n++) {
@@ -433,6 +513,15 @@ static jint mygo_platform_announce(const char *text, int text_len) {
 }
 static jint mygo_platform_set_tree(const char *json, int json_len) {
 	return mygo_platform_call_void(mygo_mid_set_tree, json, json_len);
+}
+static jint mygo_platform_secret_set(const char *ns, int ns_len, const char *key, int key_len, const char *value, int value_len, int accessibility) {
+	return mygo_platform_call_secret_set(mygo_mid_secret_set, ns, ns_len, key, key_len, value, value_len, accessibility);
+}
+static char *mygo_platform_secret_get(const char *ns, int ns_len, const char *key, int key_len, int *out_len) {
+	return mygo_platform_call_secret_get(mygo_mid_secret_get, ns, ns_len, key, key_len, out_len);
+}
+static jint mygo_platform_secret_delete(const char *ns, int ns_len, const char *key, int key_len) {
+	return mygo_platform_call_secret_delete(mygo_mid_secret_delete, ns, ns_len, key, key_len);
 }
 */
 import "C"
@@ -635,6 +724,77 @@ func (androidJNI) SetAccessibilityTreeJSON(json string) error {
 	return nil
 }
 
+// SecretSet stores value under namespace/key in the Keystore.
+func (androidJNI) SecretSet(namespace, key string, value []byte, accessibility string) error {
+	if !attached() {
+		return backend.ErrPlatformBridge
+	}
+	ns, nsLen := cBytes(namespace)
+	defer cFree(ns)
+	k, kLen := cBytes(key)
+	defer cFree(k)
+	v, vLen := cBytes(string(value))
+	defer cFree(v)
+	// 1 is "the Java side stored it already, or refused"; both are final.
+	switch C.mygo_platform_secret_set(ns, nsLen, k, kLen, v, vLen, C.int(accessibilityCode(accessibility))) {
+	case -1:
+		return backend.ErrPlatformBridge
+	case 0:
+		return nil
+	}
+	return errSecretStore
+}
+
+// SecretGet reads value. A missing one is platform.ErrSecretNotFound.
+func (androidJNI) SecretGet(namespace, key string) ([]byte, error) {
+	if !attached() {
+		return nil, backend.ErrPlatformBridge
+	}
+	ns, nsLen := cBytes(namespace)
+	defer cFree(ns)
+	k, kLen := cBytes(key)
+	defer cFree(k)
+	var n C.int
+	s, ok := takeJavaBytes(C.mygo_platform_secret_get(ns, nsLen, k, kLen, &n), n)
+	if !ok {
+		// The Java side returns null for both "no such secret" and a failed
+		// unwrap; attaching is what tells them apart here, and the platform
+		// is attached by the check above, so it is the store's answer.
+		return nil, platform.ErrSecretNotFound
+	}
+	return []byte(s), nil
+}
+
+// SecretDelete removes value; removing one that is not there is not an error.
+func (androidJNI) SecretDelete(namespace, key string) error {
+	if !attached() {
+		return backend.ErrPlatformBridge
+	}
+	ns, nsLen := cBytes(namespace)
+	defer cFree(ns)
+	k, kLen := cBytes(key)
+	defer cFree(k)
+	switch C.mygo_platform_secret_delete(ns, nsLen, k, kLen) {
+	case -1:
+		return backend.ErrPlatformBridge
+	case 0:
+		return nil
+	}
+	return errSecretStore
+}
+
+// accessibilityCode maps mygo's accessibility to the int the Java side takes.
+// The Keystore has no per-item lifetime — an entry is readable whenever the
+// device is unlocked — so only the after-first-unlock value has a meaning here
+// (readable from the first unlock after boot, which is what the Java side
+// implements by never holding a key that needs the screen on).
+func accessibilityCode(s string) int {
+	if s == "after-first-unlock" {
+		return 1
+	}
+	return 0
+}
+
 // The errors this file adds. None of them is platform.ErrNotificationsDenied,
 // which says the user said no: these say the call or the platform failed.
 var (
@@ -642,6 +802,7 @@ var (
 	errNoActivity       = errors.New("mygo: no app on this device handles that URL")
 	errNilNotification  = errors.New("mygo: nil notification")
 	errPostNotification = errors.New("mygo: Android refused the notification")
+	errSecretStore      = errors.New("mygo: Android refused the secure store write")
 )
 
 // joinSubtitle is the body a notification shows when it carries a subtitle.

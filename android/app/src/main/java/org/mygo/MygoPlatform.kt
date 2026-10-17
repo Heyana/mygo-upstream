@@ -14,6 +14,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Rect
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -26,6 +29,11 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeProvider
 import org.json.JSONArray
 import org.json.JSONObject
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Android 平台能力的 Java 侧实现：剪贴板、打开 URL、通知、无障碍。
@@ -945,6 +953,12 @@ object MygoPlatform {
     private fun Manifest_permission_POST_NOTIFICATIONS(): String =
         "android.permission.POST_NOTIFICATIONS"
 
+    private companion object {
+        const val KEY_ALIAS = "mygo-secrets-v1"
+        const val GCM_IV_LEN = 12
+        const val GCM_TAG_BITS = 128
+    }
+
     // ── Java → Go：3 个 external（JNI 符号 Java_org_mygo_MygoPlatform_*）──
     // 名字/参数/返回值与 android/jni/jni_platform.go 的 //export **逐字**一致，
     // 改一个就两边一起改（javap 是核对手段，见产出）。
@@ -957,4 +971,98 @@ object MygoPlatform {
 
     /** 无障碍动作（参数是动作名字的 UTF-8 字节，名字见 accessActionKinds）。 */
     private external fun nativeAccessibilityAction(id: Long, action: ByteArray)
+
+    // ── 安全存储（Keystore）─────────────────────────────────────────────
+    //
+    // 一个本应用的 AES 密钥放在 AndroidKeyStore 里（设备有硬件就落硬件），
+    // 条目用它是 GCM 加密后 Base64 存进本应用的 SharedPreferences。这是 Android
+    // 给得到的东西，也是为什么 Get 会在 Set 成功过之后仍然失败：删掉锁屏、或把
+    // 应用数据恢复到另一台设备，密钥会被作废，它加密过的条目就读不回来了。
+    // 那时这里返回 null，Go 侧报 platform.ErrSecretNotFound，并把原因记进 logcat。
+    //
+    // 与 iOS 的 Keychain 相比少了「按条目设生命周期」：android 的条目设备解锁后
+    // 就能读，所以 accessibility 参数只区分「首次解锁后可用」，其余取值等价。
+
+    private fun secretPrefs(ctx: Context) =
+        ctx.getSharedPreferences("mygo-secrets", Context.MODE_PRIVATE)
+
+    private fun secretKey(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return gen.generateKey()
+    }
+
+    private fun secretEntryName(ns: String, key: String): String =
+        Base64.encodeToString("$ns\u0000$key".toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+
+    /**
+     * 存一个值。返回 true 表示已写入。
+     *
+     * `accessibility` 目前只用来占位：Keystore 的条目没有按条目的生命周期。
+     */
+    fun secretSet(ns: ByteArray, key: ByteArray, value: ByteArray, accessibility: Int): Boolean {
+        val ctx = activity ?: return false
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.ENCRYPT_MODE, secretKey())
+            val sealed = cipher.iv + cipher.doFinal(value)
+            secretPrefs(ctx).edit()
+                .putString(
+                    secretEntryName(String(ns, Charsets.UTF_8), String(key, Charsets.UTF_8)),
+                    Base64.encodeToString(sealed, Base64.NO_WRAP),
+                )
+                .apply()
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("mygo", "secretSet failed: $e")
+            false
+        }
+    }
+
+    /** 读一个值；不存在或密钥已作废时返回 null。 */
+    fun secretGet(ns: ByteArray, key: ByteArray): ByteArray? {
+        val ctx = activity ?: return null
+        val name = secretEntryName(String(ns, Charsets.UTF_8), String(key, Charsets.UTF_8))
+        val stored = secretPrefs(ctx).getString(name, null) ?: return null
+        return try {
+            val sealed = Base64.decode(stored, Base64.NO_WRAP)
+            if (sealed.size <= GCM_IV_LEN) return null
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                secretKey(),
+                GCMParameterSpec(GCM_TAG_BITS, sealed, 0, GCM_IV_LEN),
+            )
+            cipher.doFinal(sealed, GCM_IV_LEN, sealed.size - GCM_IV_LEN)
+        } catch (e: Exception) {
+            // A key that was invalidated, or a value from another install:
+            // unreadable, and worth saying so.
+            android.util.Log.w("mygo", "secretGet failed: $e")
+            null
+        }
+    }
+
+    /** 删一个值；不存在也算成功。 */
+    fun secretDelete(ns: ByteArray, key: ByteArray): Boolean {
+        val ctx = activity ?: return false
+        return try {
+            secretPrefs(ctx).edit()
+                .remove(secretEntryName(String(ns, Charsets.UTF_8), String(key, Charsets.UTF_8)))
+                .commit()
+        } catch (e: Exception) {
+            android.util.Log.w("mygo", "secretDelete failed: $e")
+            false
+        }
+    }
 }

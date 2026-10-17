@@ -49,6 +49,39 @@ type fakeBridge struct {
 	trees      []string
 	treeErr    error
 	announceNo int
+
+	secrets   map[string][]byte
+	secretErr error
+}
+
+func (f *fakeBridge) SecretSet(namespace, key string, value []byte, accessibility string) error {
+	if f.secretErr != nil {
+		return f.secretErr
+	}
+	if f.secrets == nil {
+		f.secrets = map[string][]byte{}
+	}
+	f.secrets[namespace+"\x00"+key] = append([]byte(nil), value...)
+	return nil
+}
+
+func (f *fakeBridge) SecretGet(namespace, key string) ([]byte, error) {
+	if f.secretErr != nil {
+		return nil, f.secretErr
+	}
+	v, ok := f.secrets[namespace+"\x00"+key]
+	if !ok {
+		return nil, platform.ErrSecretNotFound
+	}
+	return append([]byte(nil), v...), nil
+}
+
+func (f *fakeBridge) SecretDelete(namespace, key string) error {
+	if f.secretErr != nil {
+		return f.secretErr
+	}
+	delete(f.secrets, namespace+"\x00"+key)
+	return nil
 }
 
 func (f *fakeBridge) ClipboardRead() (ClipboardPayload, []string, error) {
