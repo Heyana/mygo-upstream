@@ -196,7 +196,9 @@ func (t *Terminal) InsertNewline() {
 	paste := t.term != nil && t.term.Mode(vt.ModeBracketedPaste)
 	t.mu.Unlock()
 	if paste {
-		t.contextText("\n")
+		// pasteData mirrors what it pastes into the input context (paste.go),
+		// so writing it here too records the newline twice: the editable
+		// text grows a blank line the program never received.
 		t.Paste("\n")
 	} else {
 		t.SendKey(ui.KeyEnter, ui.Alt)
