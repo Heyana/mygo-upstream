@@ -26,11 +26,11 @@ import (
 	"strings"
 	"unsafe"
 
-	"github.com/egoist/mygo/internal/probe"
 	"github.com/Heyana/typesetting-go/di"
 	"github.com/Heyana/typesetting-go/font"
 	ot "github.com/Heyana/typesetting-go/font/opentype"
 	"github.com/Heyana/typesetting-go/shaping"
+	"github.com/egoist/mygo/internal/probe"
 	"golang.org/x/image/math/fixed"
 	"golang.org/x/image/vector"
 

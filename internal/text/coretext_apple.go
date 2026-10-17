@@ -15,10 +15,10 @@ import (
 	"unicode"
 	"unsafe"
 
+	"github.com/Heyana/typesetting-go/segmenter"
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 	"github.com/egoist/mygo/internal/scene"
-	"github.com/Heyana/typesetting-go/segmenter"
 )
 
 // Core Text lays out paragraphs: a typesetter finds the fonts, falls back
