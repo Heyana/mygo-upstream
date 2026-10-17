@@ -953,11 +953,9 @@ object MygoPlatform {
     private fun Manifest_permission_POST_NOTIFICATIONS(): String =
         "android.permission.POST_NOTIFICATIONS"
 
-    private companion object {
-        const val KEY_ALIAS = "mygo-secrets-v1"
-        const val GCM_IV_LEN = 12
-        const val GCM_TAG_BITS = 128
-    }
+    private const val KEY_ALIAS = "mygo-secrets-v1"
+    private const val GCM_IV_LEN = 12
+    private const val GCM_TAG_BITS = 128
 
     // ── Java → Go：3 个 external（JNI 符号 Java_org_mygo_MygoPlatform_*）──
     // 名字/参数/返回值与 android/jni/jni_platform.go 的 //export **逐字**一致，
