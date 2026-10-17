@@ -478,3 +478,47 @@ func TestTextInputFocus(t *testing.T) {
 		t.Errorf("keyboard states = %v, want %v", active, want)
 	}
 }
+
+// TestOptionsReachTheHost covers the path that lets an element say what its
+// Return key is: Ime.SetTextInput reports TextInputState.Options through
+// OnOptions, and only when it changes.
+//
+// What it protects: without this report the Android side kept the traits
+// MygoView hardcodes — IME_ACTION_NONE among them — so a Return key was never
+// an action, the input method consumed Enter itself, and a terminal could not
+// run a command. The report is what carries ReturnSend to Java.
+func TestOptionsReachTheHost(t *testing.T) {
+	m := &Ime{}
+	var got []platform.TextInputOptions
+	m.OnOptions = func(o platform.TextInputOptions) { got = append(got, o) }
+	c := &recordingClient{}
+
+	send := platform.TextInputOptions{Return: "send"}
+	m.SetTextInput(platform.TextInputState{Active: true, Client: c, Options: send})
+	m.SetTextInput(platform.TextInputState{Active: true, Client: c, Options: send})
+	m.SetTextInput(platform.TextInputState{Active: true, Client: c, Options: platform.TextInputOptions{Return: "done"}})
+
+	if len(got) != 2 {
+		t.Fatalf("OnOptions ran %d times, want 2: an unchanged state must not report again", len(got))
+	}
+	if got[0].Return != "send" {
+		t.Errorf("first report Return = %q, want \"send\"", got[0].Return)
+	}
+	if got[1].Return != "done" {
+		t.Errorf("second report Return = %q, want \"done\"", got[1].Return)
+	}
+	if m.Options().Return != "done" {
+		t.Errorf("Options() = %q, want the last reported \"done\"", m.Options().Return)
+	}
+}
+
+// TestOptionsStoredWithoutHost keeps Options readable when nothing listens:
+// the Java side asks for it while building an InputConnection, which can
+// happen before package main has installed OnOptions.
+func TestOptionsStoredWithoutHost(t *testing.T) {
+	m := &Ime{}
+	m.SetTextInput(platform.TextInputState{Active: true, Client: &recordingClient{}, Options: platform.TextInputOptions{Return: "send"}})
+	if got := m.Options().Return; got != "send" {
+		t.Errorf("Options() = %q, want \"send\"", got)
+	}
+}

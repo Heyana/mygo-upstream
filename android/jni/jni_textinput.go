@@ -453,6 +453,44 @@ func Java_org_mygo_MygoIme_nativeSelectionStart(env *C.JNIEnv, thiz C.jobject) C
 	return C.jint(start)
 }
 
+// Java_org_mygo_MygoIme_nativeReturnKey is the keyboard's Return action for
+// EditorInfo.imeOptions, as an index into a fixed list the Kotlin side
+// mirrors. 0 means no action (IME_ACTION_NONE), which is what an empty
+// Return leaves — so a field that says nothing keeps the old behaviour.
+//
+// 🔴 Why an index and not the string: an InputConnection is built on Java's
+// main thread while the pump owns the state, and imeCall is the one safe way
+// across (see the file header). An int crosses it with no allocation and no
+// encoding question; the mapping from ReturnKey to imeOptions belongs on the
+// Java side anyway, because the constants are Java's.
+//
+// The order must match ReturnKey.kt on the Kotlin side:
+//   0 none, 1 done, 2 go, 3 next, 4 search, 5 send, 6 continue.
+//
+//export Java_org_mygo_MygoIme_nativeReturnKey
+func Java_org_mygo_MygoIme_nativeReturnKey(env *C.JNIEnv, thiz C.jobject) C.jint {
+	var idx int
+	imeCall(func() {
+		switch backend.TheIme().Options().Return {
+		case "done":
+			idx = 1
+		case "go":
+			idx = 2
+		case "next":
+			idx = 3
+		case "search":
+			idx = 4
+		case "send":
+			idx = 5
+		case "continue":
+			idx = 6
+		default:
+			idx = 0
+		}
+	})
+	return C.jint(idx)
+}
+
 // Java_org_mygo_MygoIme_nativeSelectionEnd is the selection's end, or -1.
 //
 //export Java_org_mygo_MygoIme_nativeSelectionEnd

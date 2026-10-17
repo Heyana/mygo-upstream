@@ -275,6 +275,29 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
     /** 本 View 是文字编辑器：系统据此才会为它建 InputConnection 并派发 IME 事件。 */
     override fun onCheckIsTextEditor(): Boolean = true
 
+    /**
+     * 把 Go 侧的 `InputOptions.Return` 映射成 [EditorInfo.imeOptions] 的那个字段。
+     *
+     * 索引顺序与 Go 侧 `nativeReturnKey` 一致。取不到值（没有可编辑元素、
+     * 或元素没设 Return）时给 IME_ACTION_NONE：那是这里一直以来的行为，
+     * 文本编辑器靠它拿到换行。
+     */
+    private fun returnAction(): Int = try {
+        when (MygoIme.nativeReturnKey()) {
+            1 -> EditorInfo.IME_ACTION_DONE
+            2 -> EditorInfo.IME_ACTION_GO
+            3 -> EditorInfo.IME_ACTION_NEXT
+            4 -> EditorInfo.IME_ACTION_SEARCH
+            5 -> EditorInfo.IME_ACTION_SEND
+            6 -> EditorInfo.IME_ACTION_DONE // Android 没有 continue，用 done
+            else -> EditorInfo.IME_ACTION_NONE
+        }
+    } catch (e: Throwable) {
+        // 库还没加载（或正在退出）时不要因此崩掉一次建连接 —— Go 侧的
+        // 「没有动作」就是这里的默认值。
+        EditorInfo.IME_ACTION_NONE
+    }
+
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
         // 光标/选中的初值从 Go 侧取；取不到（-1，表示当前没有可编辑元素）时给 0，
         // 输入法至少不会拿到越界的位置。之后每次编辑后输入法都会用
@@ -288,8 +311,12 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
             InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        // 不要全屏 IME；多行编辑器里 Enter 就是换行，不要给它一个「动作」。
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_ACTION_NONE
+        // 不要全屏 IME。Return 的动作由元素自己说（ui.InputOptions.Return）：
+        // 文本编辑器要的是换行（IME_ACTION_NONE），而终端要的是每条命令以回车
+        // 结束 —— 设成 IME_ACTION_SEND 之类之后，回车键才会变成一个真正的
+        // 「动作键」，由 performEditorAction 送回按键路径，而不是被输入法
+        // 当成编辑自己消费掉。
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or returnAction()
         return MygoImeConnection(this)
     }
 

@@ -100,6 +100,19 @@ object MygoIme {
 
     external fun nativeSelectionStart(): Int
 
+    /**
+     * 光标处的键盘 Return 动作，作为 [EditorInfo.imeOptions] 的索引：
+     * 0 无动作（IME_ACTION_NONE），1 done，2 go，3 next，4 search，5 send，6 continue。
+     *
+     * 顺序必须与 Go 侧 `Java_org_mygo_MygoIme_nativeReturnKey` 一致。
+     * 值为空（元素没设 InputOptions.Return）时返回 0 —— 保持原来的行为。
+     *
+     * 🔴 为什么需要它：MygoView 硬编码 IME_ACTION_NONE，于是回车永远是
+     * 「换行」而不是「动作」，输入法会自己把回车吃掉。终端要的是每条命令
+     * 都以回车结束，所以它设 ReturnSend，这里才把回车变成真正的动作键。
+     */
+    external fun nativeReturnKey(): Int
+
     external fun nativeSelectionEnd(): Int
 }
 
@@ -162,4 +175,26 @@ class MygoImeConnection(private val view: View) : BaseInputConnection(view, true
      * `backend.OnKey`。**不要**另开一条 native 入口，那会让同一个键有两个来源。
      */
     override fun sendKeyEvent(event: KeyEvent): Boolean = view.dispatchKeyEvent(event)
+
+    /**
+     * 动作键（IME_ACTION_SEND / GO / DONE …）按下时走这里。
+     *
+     * 🔴 这是终端能执行命令的关键。把 Return 设成一个 action 之后，回车键
+     * 就不再产生换行，而是变成一个「动作」交给编辑器；终端要的不是被叫醒
+     * 一次，是收到一个回车。所以动作一律还原成 [KeyEvent.KEYCODE_ENTER]，
+     * 送回 View 的按键路径 —— 与 [sendKeyEvent] 同一条路，Go 侧密钥编码器
+     * 才知道它是 Enter（终端里那是 CR，不是一个换行字符）。
+     *
+     * 编辑器（TextInput/TextArea）不会走到这里：它们的 Return 是
+     * IME_ACTION_NONE，输入法直接把换行作为文字提交过来。
+     *
+     * 返回 true：动作已被消费，Android 不必再去点「下一项」或收键盘。
+     */
+    override fun performEditorAction(editorAction: Int): Boolean {
+        val down = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER)
+        val up = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_ENTER)
+        view.dispatchKeyEvent(down)
+        view.dispatchKeyEvent(up)
+        return true
+    }
 }

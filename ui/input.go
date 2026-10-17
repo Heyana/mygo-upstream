@@ -932,7 +932,20 @@ func (rt *engine) shortcut(id uint64, mods Modifiers, key Key) bool {
 
 func (rt *engine) editEvent(ev editEvent) {
 	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !ev.snapshot && !rt.snapshotTextInput(s) && rt.windowFocus() && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
-		if ev.kind == editInsert || ev.kind == editCompose {
+		// 🔴 An element that pairs HandleTextInput with HandleInput takes its
+		// text through HandleInput whenever a software modifier is held, so the
+		// combination is built where it always is: in deliver.
+		//
+		// This branch runs before deliver, so without it a Ctrl held on a
+		// software keyboard reached the client as plain text — Ctrl+c arrived
+		// as "c" and typed a letter instead of interrupting the program, and
+		// a terminal's Cmd+click lost its Cmd. Only a one-character commit is
+		// eligible, by the same rule deliver applies.
+		// The handler below adds the modifiers in deliver, which is also where
+		// inputConsumed is honoured.
+		viaHandler := ev.kind == editInsert && s.input != nil && s.inputModifiers != 0 &&
+			!s.inputComposing && len(ev.text) == 1 && ev.text[0] < 128
+		if !viaHandler && (ev.kind == editInsert || ev.kind == editCompose) {
 			var r *TextInputRange
 			if ev.replace {
 				v := TextInputRange{Start: ev.from, End: ev.to}

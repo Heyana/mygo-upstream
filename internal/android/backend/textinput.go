@@ -49,6 +49,25 @@ type Ime struct {
 	// installs the function (jni_textinput.go); this package stays free of
 	// JNI. It runs on the pump goroutine.
 	OnActive func(active bool)
+
+	// OnOptions, when set, is told the keyboard traits of the element that
+	// took the keyboard, as its InputOptions describe them (ui.TextInputState
+	// .Options). Android maps them onto EditorInfo when it builds the
+	// InputConnection, which is why they are reported separately from
+	// OnActive: the connection may not exist yet when the keyboard is raised
+	// (see MygoIme.bindView in the Kotlin side).
+	//
+	// 🔴 Without this the input method keeps the traits MygoView hardcodes —
+	// IME_ACTION_NONE among them — so a Return key is never an action and the
+	// input method consumes Enter itself. A field that asked for ReturnSend
+	// got an Enter that never reached it, which is what made a terminal
+	// unable to run a command. Runs on the pump goroutine.
+	OnOptions func(platform.TextInputOptions)
+
+	// options is the last value reported through OnOptions, so a connection
+	// built later can read it without the state having to be re-sent. The
+	// Java side asks for it in onCreateInputConnection.
+	options platform.TextInputOptions
 }
 
 // theIme is the process's single state machine. Android has one Activity and
@@ -77,8 +96,28 @@ func (m *Ime) SetTextInput(t platform.TextInputState) {
 		return
 	}
 	m.SetClient(t.Client)
+	m.setOptions(t.Options)
 	m.active(t.Client != nil)
 }
+
+// setOptions reports the keyboard traits to the host, when they changed.
+//
+// Comparing first keeps a frame that rebuilds an unchanged editable element
+// from re-sending the same traits: OnOptions reaches Java through the pump,
+// and the connection only needs them once.
+func (m *Ime) setOptions(o platform.TextInputOptions) {
+	if m.options == o {
+		return
+	}
+	m.options = o
+	if m.OnOptions != nil {
+		m.OnOptions(o)
+	}
+}
+
+// Options returns the traits last reported, for a host that builds its
+// InputConnection after the keyboard was already raised.
+func (m *Ime) Options() platform.TextInputOptions { return m.options }
 
 // SetClient points the state machine at the focused element's client, or at
 // nothing when the element stops editing.
