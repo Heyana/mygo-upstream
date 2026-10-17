@@ -113,3 +113,39 @@ func load() error {
 	})
 	return errLoad
 }
+
+// contextVersion returns the version of the current context, major × 10 +
+// minor, and whether it is OpenGL ES.
+func contextVersion() (version int32, es bool) { return epoxyGLVersion(), !epoxyIsDesktopGL() }
+
+// hasExtension reports whether the current context has an extension.
+func hasExtension(name string) bool { return epoxyHasExtension(name) }
+
+// versionString describes the current context's version, for errors.
+func versionString() string { return goString(glGetString(glVersion)) }
+
+// rendererString names the current context's renderer.
+func rendererString() string { return goString(glGetString(glRenderer)) }
+
+// setShaderSource sets the source of a shader.
+func setShaderSource(s uint32, src string) {
+	b := append([]byte(src), 0)
+	p := &b[0]
+	glShaderSource(s, 1, &p, nil)
+}
+
+// shaderLog and programLog return what compiling a shader or linking a
+// program logged.
+func shaderLog(s uint32) string  { return infoLog(s, glGetShaderiv, glGetShaderInfoLog) }
+func programLog(p uint32) string { return infoLog(p, glGetProgramiv, glGetProgramInfoLog) }
+
+func infoLog(obj uint32, get func(uint32, uint32, *int32), read func(uint32, int32, *int32, *byte)) string {
+	var n int32
+	get(obj, glInfoLogLength, &n)
+	if n <= 1 {
+		return "no log"
+	}
+	buf := make([]byte, n)
+	read(obj, n, nil, &buf[0])
+	return strings.TrimSpace(string(buf[:n-1]))
+}

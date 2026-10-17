@@ -180,6 +180,7 @@ func (h *headless) safeArea() SafeArea {
 	a := h.safe
 	return SafeArea{Top: float32(a.Top), Right: float32(a.Right), Bottom: float32(a.Bottom), Left: float32(a.Left)}
 }
+
 // openURL notes the link, and gives done the error FailOpenURL set before
 // the next frame, as a window gives it after the system opened the link.
 func (h *headless) openURL(u string, done func(error)) {

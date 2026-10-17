@@ -1130,6 +1130,7 @@ func (b *Backend) SetSystemLanguages(tags ...string) {
 	b.mu.Unlock()
 	b.h.LocaleChanged()
 }
+
 // SetSafeArea makes the window report a device's chrome taking room, as a
 // phone does: a status bar at the top, a home indicator at the bottom. It
 // reports the change the way a device does, through the window's handler,
