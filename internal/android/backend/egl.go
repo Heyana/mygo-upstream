@@ -15,7 +15,7 @@ package backend
 import "C"
 
 import (
-	"errors"
+	"fmt"
 	"unsafe"
 )
 
@@ -56,27 +56,45 @@ func (e *eglState) init() error {
 	}
 	display := C.eglGetDisplay(C.EGL_DEFAULT_DISPLAY)
 	if display == C.EGL_NO_DISPLAY {
-		return errors.New("eglGetDisplay returned no display")
+		return fmt.Errorf("eglGetDisplay returned no display (0x%x)", C.eglGetError())
 	}
 	var major, minor C.EGLint
 	if C.eglInitialize(display, &major, &minor) == C.EGL_FALSE {
-		return errors.New("eglInitialize failed")
+		return fmt.Errorf("eglInitialize failed (0x%x)", C.eglGetError())
 	}
-	configAttribs := []C.EGLint{
+	// The config is asked for twice: the first asks for an alpha channel,
+	// the second does not. A window on Android is opaque — its surface
+	// holds no alpha — and a driver that has no ES3 config with alpha for
+	// a window but has one without, answers the first with nothing. The
+	// alpha channel is not needed to composite (the compositor reads the
+	// surface as opaque), so the second ask is the one that matters, and
+	// the first is kept because some devices (Samsung S9, as gio notes)
+	// want it.
+	//
+	// Falling through to drawing in memory instead, which is what a single
+	// ask did, costs about 10 ms a frame on a 1440x3168 phone: the whole
+	// frame is copied from the CPU to the window.
+	base := []C.EGLint{
 		C.EGL_RENDERABLE_TYPE, C.EGL_OPENGL_ES3_BIT,
 		C.EGL_SURFACE_TYPE, C.EGL_WINDOW_BIT,
 		C.EGL_RED_SIZE, 8,
 		C.EGL_GREEN_SIZE, 8,
 		C.EGL_BLUE_SIZE, 8,
-		C.EGL_ALPHA_SIZE, 8,
 		C.EGL_DEPTH_SIZE, 0,
 		C.EGL_STENCIL_SIZE, 0,
-		C.EGL_NONE,
 	}
 	var config C.EGLConfig
 	var n C.EGLint
-	if C.eglChooseConfig(display, &configAttribs[0], &config, 1, &n) == C.EGL_FALSE || n < 1 {
-		return errors.New("eglChooseConfig found no RGBA8888 ES3 config")
+	chosen := false
+	for _, alpha := range []C.EGLint{8, 0} {
+		attribs := append(append([]C.EGLint{}, base...), C.EGL_ALPHA_SIZE, alpha, C.EGL_NONE)
+		if C.eglChooseConfig(display, &attribs[0], &config, 1, &n) == C.EGL_TRUE && n >= 1 {
+			chosen = true
+			break
+		}
+	}
+	if !chosen {
+		return fmt.Errorf("eglChooseConfig found no ES3 window config (0x%x)", C.eglGetError())
 	}
 	contextAttribs := []C.EGLint{
 		C.EGL_CONTEXT_CLIENT_VERSION, 3,
@@ -84,7 +102,7 @@ func (e *eglState) init() error {
 	}
 	context := C.eglCreateContext(display, config, C.EGL_NO_CONTEXT, &contextAttribs[0])
 	if context == C.EGL_NO_CONTEXT {
-		return errors.New("eglCreateContext failed")
+		return fmt.Errorf("eglCreateContext failed (0x%x)", C.eglGetError())
 	}
 	e.display, e.config, e.context = display, config, context
 	e.initialized = true
@@ -99,9 +117,22 @@ func (e *eglState) createWindow(window unsafe.Pointer) error {
 	if e.surface != C.EGL_NO_SURFACE {
 		e.destroyWindow()
 	}
+	// First with no attributes, then — if that fails — with an explicit
+	// empty list. The two are the same call to every driver seen so far,
+	// but some answer nil and not an EGL_NO_SURFACE-terminated list (gio
+	// carries the same retry, with an sRGB colorspace attribute it drops
+	// on the second try; this backend asks for no colorspace at all, since
+	// its frames are sRGB and the surface's default is what it wants).
+	//
+	// The error carries eglGetError(): "failed" alone is what this said
+	// before, and it sent a whole afternoon after the wrong thing.
 	surface := C.eglCreateWindowSurface(e.display, e.config, (*C.ANativeWindow)(window), nil)
 	if surface == C.EGL_NO_SURFACE {
-		return errors.New("eglCreateWindowSurface failed")
+		empty := []C.EGLint{C.EGL_NONE}
+		surface = C.eglCreateWindowSurface(e.display, e.config, (*C.ANativeWindow)(window), &empty[0])
+	}
+	if surface == C.EGL_NO_SURFACE {
+		return fmt.Errorf("eglCreateWindowSurface failed (0x%x)", C.eglGetError())
 	}
 	e.surface = surface
 	return nil

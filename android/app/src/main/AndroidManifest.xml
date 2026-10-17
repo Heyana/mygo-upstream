@@ -26,6 +26,11 @@
     -->
     <!-- T34: Android 13+ 发通知需要该运行时权限（缺它时 notify() 会被系统接受并丢弃） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- pprof 的调试服务器（lab 的 cmd/lab/pprof_android.go）要开一个
+         127.0.0.1 的 socket，而 Android 10 起没有这个权限连 AF_INET 都建不了。
+         它只绑回环，不接外网；release 包不带那个文件，所以这条也就没有用处，
+         留着是因为 debug 包才需要它。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="false"

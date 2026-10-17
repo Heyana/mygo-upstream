@@ -47,7 +47,7 @@ type Surface struct {
 // the closest, and the choice is repeated here in case a dedicated field is
 // wanted later.
 func (s *Surface) Native() platform.SurfaceNative {
-	return platform.SurfaceNative{View: uintptr(s.window)}
+	return platform.SurfaceNative{View: uintptr(s.window), Present: s}
 }
 
 // Size returns the drawing area in DIPs and how many device pixels a DIP

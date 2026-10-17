@@ -48,6 +48,22 @@ android {
         targetSdk 36
     }
 
+    // 一个 release 包要看的是它和 debug 包差在哪：体积、以及 debug 包多背的
+    // 那些东西（可调试标记、inspector、帧统计）。AGP 要求 release 必须有签名
+    // 才能装，而实验室要的是一个能装上、能量内存的包，不是能上架的包 ——
+    // 所以签的是本机的 debug keystore：`~/.android/debug.keystore`，口令
+    // android/android，全世界的 Android SDK 都一样，不是秘密。
+    //
+    // 要真上架时换掉这一段，别把 debug 签名发出去。
+    signingConfigs {
+        release {
+            storeFile file(System.getProperty('user.home') + '/.android/debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
         debug {
             minifyEnabled false
@@ -55,6 +71,7 @@ android {
         release {
             // 首个宿主工程不开混淆：JNI 方法名会被 R8 改名/裁剪的风险不值得现在承担
             minifyEnabled false
+            signingConfig signingConfigs.release
         }
     }
 

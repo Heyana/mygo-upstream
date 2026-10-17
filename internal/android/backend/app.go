@@ -401,12 +401,22 @@ func (b *Backend) surfaceCreated(window unsafe.Pointer) {
 		b.surface = &Surface{b: b, egl: b.egl}
 	}
 	b.surface.window = window
-	if err := b.egl.createWindow(window); err != nil {
-		log.Printf("mygo/android: egl: %v", err)
-		return
-	}
-	// The size is not known yet (it arrives with surfaceChanged, or from
-	// eglQuerySurface); the first frame is drawn there.
+	// 🔴 The EGLSurface is NOT made here, and that is the fix for a real
+	// EGL_BAD_ALLOC (0x3003) on a 1440x3168 phone.
+	//
+	// A surfaceCreated arrives before the window has a size: the Surface's
+	// buffers are not allocated until the surface has one, which is what
+	// surfaceChanged reports — and a driver asked to allocate window
+	// buffers for an unsized window answers EGL_BAD_ALLOC, not a
+	// configuration error. This function used to call createWindow here
+	// anyway (the comment right below admitted the size was not known
+	// yet), the call failed, and the app drew every frame in memory for
+	// the rest of its life: about 10 ms a frame copying 18 MB from the CPU
+	// to the window.
+	//
+	// gio's GioView ignores surfaceCreated outright — "surfaceChanged is
+	// guaranteed to be called immediately after this" — and makes its
+	// EGLSurface there. surfaceChanged below does the same thing now.
 }
 
 // surfaceChanged (pump) records the size and shows one frame — the frame
@@ -421,6 +431,14 @@ func (b *Backend) surfaceChanged(w, h, dpi int) {
 	b.surface.width, b.surface.height = w, h
 	if dpi > 0 {
 		b.surface.dpi = dpi
+	}
+	// The window has a size now, so this is where the EGLSurface is made —
+	// see surfaceCreated above for why it cannot be made before.
+	if b.egl.surface == nil {
+		if err := b.egl.createWindow(b.surface.window); err != nil {
+			log.Printf("mygo/android: egl: %v", err)
+			return
+		}
 	}
 	b.surface.PresentPixels(nil, 0, w, h)
 }

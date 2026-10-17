@@ -233,6 +233,27 @@ type HeapReading struct {
 	PauseTotal time.Duration
 	// Goroutines is how many goroutines run.
 	Goroutines int
+
+	// The heap, split the way the runtime splits it. HeapSys is the arena
+	// the runtime took from the OS; HeapInuse is the part of it holding
+	// spans, which is the memory the process is really paying for; HeapIdle
+	// is the part it holds and is not using, which on a platform that can
+	// give pages back (Linux, Windows) is not residence but on one that
+	// cannot (wasm) is. HeapReleased is what it has given back.
+	//
+	// A display that shows Alloc alone reads as small and quiet: Alloc is
+	// live objects, and a program that allocates and frees a lot has a
+	// small Alloc over a large arena. The split is what says which.
+	HeapSys      int64
+	HeapInuse    int64
+	HeapIdle     int64
+	HeapReleased int64
+	HeapObjects  uint64
+	StackSys     int64
+	// MSpanSys, MCacheSys, BuckHashSys, GCSys and OtherSys are the
+	// runtime's own bookkeeping, all of it small except GCSys's write
+	// barriers and OtherSys's profile buffers.
+	MSpanSys, MCacheSys, BuckHashSys, GCSys, OtherSys int64
 }
 
 // HeapReadingNow returns the current heap reading. ReadMemStats stops the
@@ -248,5 +269,17 @@ func HeapReadingNow() HeapReading {
 		NumGC:      m.NumGC,
 		PauseTotal: time.Duration(m.PauseTotalNs),
 		Goroutines: runtime.NumGoroutine(),
+
+		HeapSys:      int64(m.HeapSys),
+		HeapInuse:    int64(m.HeapInuse),
+		HeapIdle:     int64(m.HeapIdle),
+		HeapReleased: int64(m.HeapReleased),
+		HeapObjects:  m.HeapObjects,
+		StackSys:     int64(m.StackSys),
+		MSpanSys:     int64(m.MSpanSys),
+		MCacheSys:    int64(m.MCacheSys),
+		BuckHashSys:  int64(m.BuckHashSys),
+		GCSys:        int64(m.GCSys),
+		OtherSys:     int64(m.OtherSys),
 	}
 }

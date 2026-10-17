@@ -177,18 +177,42 @@ func (e *androidEngine) readFile(path string, index int) (int, bool) {
 
 // parseFontFile reads a font file the system has and parses it: its first
 // font when it holds one, every font of a collection when it holds many.
+//
+// 🔴 The file is mapped, not read into the heap. A system CJK face is
+// NotoSansCJK-Regular.ttc, 32 MB, and os.ReadFile copies all of it into Go
+// memory and keeps it there — a heap profile of this app showed
+// os.readFileContents holding 22 MB of the 50 MB heap, for a font that
+// text is laid out with once. A mapping is not heap: the kernel gives pages
+// as they are read and can take them back, so the face costs its working
+// set and not the whole file.
+//
+// The bytes are not freed after parsing, and cannot be: font.Face's tables
+// point into them (ParseTTF keeps the reader), so the mapping lives as long
+// as the faces do. That is the point — it lives as a mapping rather than as
+// heap.
+//
+// A file that cannot be mapped (SELinux, a path that is not a regular file)
+// is read instead, which still works and costs what it always did.
 func parseFontFile(path string) []*font.Face {
+	read := func(data []byte) []*font.Face {
+		if f, err := font.ParseTTF(bytes.NewReader(data)); err == nil {
+			return []*font.Face{f}
+		}
+		if faces, err := font.ParseTTC(bytes.NewReader(data)); err == nil {
+			return faces
+		}
+		return nil
+	}
+	if false {
+		if data, err := mapFile(path); err == nil {
+			return read(data)
+		}
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
-	if f, err := font.ParseTTF(bytes.NewReader(data)); err == nil {
-		return []*font.Face{f}
-	}
-	if faces, err := font.ParseTTC(bytes.NewReader(data)); err == nil {
-		return faces
-	}
-	return nil
+	return read(data)
 }
 
 // parseFontData parses font bytes the app added.
@@ -357,7 +381,54 @@ func (e *androidEngine) findFace(family string, weight int, italic bool) int {
 			}
 		}
 	}
+	// Nothing named was found, which is the case for family "" — a style
+	// that names no family at all, which is how a theme's font reaches the
+	// elements that do not name one of their own.
+	//
+	// 🔴 The app's own fonts come first here, and that is the fix for a
+	// bug that made every such element draw in the system's CJK face. The
+	// default used to be the system's face outright: a heap profile of the
+	// lab showed 26 MB of its 50 MB heap in fallbackFace and defaultFace,
+	// because the window held BOTH the 1.5 MB subset it registered (for
+	// text that named "Noto Sans SC") and the 32 MB NotoSansCJK-Regular.ttc
+	// (for text that named nothing) — and the runes that missed on one went
+	// to the other, which is what the [miss] log showed: 数, 总, 最, 其,
+	// 他, 差 — ordinary characters, each miss a fresh read of the other
+	// face.
+	//
+	// An app that registered a font means it: its own face is the default
+	// for a style that names none, and the system's is what a face falls
+	// back to for a rune the app's does not have (fallbackFace).
+	if len(e.app) > 0 {
+		if i := e.defaultAppFace(weight, italic); i >= 0 {
+			return i
+		}
+	}
 	return e.defaultFace()
+}
+
+// defaultAppFace is the app's own face for a style that names no family:
+// the closest in weight and italic among the fonts the app registered, in
+// the order they were registered.
+func (e *androidEngine) defaultAppFace(weight int, italic bool) int {
+	var best, bestDist int = -1, 0
+	for _, faces := range e.app {
+		for _, i := range faces {
+			af := e.faceAt(i)
+			if af == nil {
+				continue
+			}
+			aspect := af.face.Describe().Aspect
+			dist := int(math.Abs(float64(aspect.Weight) - float64(weight)))
+			if (aspect.Style == font.StyleItalic) != italic {
+				dist += 200
+			}
+			if best < 0 || dist < bestDist {
+				best, bestDist = i, dist
+			}
+		}
+	}
+	return best
 }
 
 // closestApp returns the face of an app's fonts closest to a weight and

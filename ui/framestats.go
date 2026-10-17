@@ -21,6 +21,19 @@ import (
 // tells whether it is set.
 var frameStatsThreshold, frameStatsOn = frameStatsSetting(os.Getenv("MYGO_FRAME_STATS"))
 
+// SetFrameStats turns the per-frame log on or off at run time, and sets the
+// threshold in milliseconds below which a frame is not logged (0 logs every
+// frame). An app on Android has no environment of its own — the shell's does
+// not reach it — so the switch the environment reads at start-up is useless
+// there, and this is how an Android build turns measurement on.
+//
+// It is safe to call before the first frame and does nothing after that:
+// the stats are read on the first frame's begin, so the switch has to be
+// set before the app runs.
+func SetFrameStats(threshold time.Duration) {
+	frameStatsThreshold, frameStatsOn = threshold, true
+}
+
 // frameLog writes the log of a frame; tests replace it.
 var frameLog = log.Print
 
@@ -127,6 +140,12 @@ func (f *frameStats) end(rt *engine) {
 		return
 	}
 	total := time.Since(f.start)
+	// The last frame's parts, kept for a display to show: a readout that
+	// wants to say WHERE a frame's time goes cannot read a log (writing one
+	// costs what it measures — a log.Print is several milliseconds), and
+	// the frame's own numbers are gone by the time the next one starts.
+	lastLaps = f.laps
+	lastTotal = total
 	if total < f.threshold {
 		return
 	}
@@ -161,3 +180,30 @@ func (f *frameStats) end(rt *engine) {
 		rt.frame, ms(total), ms(f.laps[phaseBuild]), passes, ms(f.laps[phaseLayout]), ms(f.laps[phasePaint]), ms(f.laps[phasePresent]), path, ms(other),
 		d[statObjects]+d[statTiny], d[statBytes]/1024, rt.text.LayoutsMade()-f.layouts, gc))
 }
+
+// PhaseReading is the parts of the last frame that was measured, and how
+// long it took in all. A display can show them (the lab's HUD does) — the
+// frame's own numbers are overwritten by the next frame, and a log is not a
+// place to read them from: measuring by printing costs more than what it
+// measures.
+type PhaseReading struct {
+	Build, Layout, Paint, Present, Other time.Duration
+	Total                                time.Duration
+	Valid                                bool
+}
+
+// FramePhases returns the parts of the last measured frame.
+func FramePhases() PhaseReading {
+	r := PhaseReading{Build: lastLaps[phaseBuild], Layout: lastLaps[phaseLayout],
+		Paint: lastLaps[phasePaint], Present: lastLaps[phasePresent], Total: lastTotal}
+	r.Other = r.Total - r.Build - r.Layout - r.Paint - r.Present
+	r.Valid = r.Total > 0
+	return r
+}
+
+// lastLaps and lastTotal are the parts of the last frame measured (end),
+// written by the pump goroutine and read by a display on it too.
+var (
+	lastLaps  [phases]time.Duration
+	lastTotal time.Duration
+)

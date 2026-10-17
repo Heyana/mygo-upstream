@@ -97,6 +97,17 @@ type IdleSurface interface {
 	Idle()
 }
 
+// FramePresenter is a surface whose frames drawn on the GPU need showing
+// when the renderer is done with them. EGL is such a renderer: unlike GTK's
+// GtkGLArea (which swaps for its area) and a Windows swap chain (which
+// presents on its own), it leaves the swap to the code that drew, so a
+// window drawing on the GPU has to say when.
+type FramePresenter interface {
+	// SetPresented tells the surface a finished frame is in the renderer's
+	// back buffer, so it can be put on the screen.
+	SetPresented()
+}
+
 // TextInputState is the state of the text input that has the keyboard,
 // for input methods.
 type TextInputState struct {
@@ -193,6 +204,12 @@ type SurfaceNative struct {
 	// Context.ID), current while SurfaceFrame events are handled
 	// (browsers).
 	Canvas uintptr
+	// Present is the surface itself, when a frame drawn on the GPU needs
+	// showing by the drawing code (Android, where EGL leaves the swap to
+	// it — see FramePresenter). It is the one field here that is not a
+	// native pointer, because the thing the renderer has to reach is the
+	// surface, and it has no handle the renderer could call through.
+	Present Surface
 }
 
 // RectF is a rectangle in DIPs with fractional coordinates.
