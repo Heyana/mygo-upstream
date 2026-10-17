@@ -133,3 +133,36 @@ func TestNativeTouchPanDismissesKeyboardOnlyInOnDragMode(t *testing.T) {
 		}
 	}
 }
+
+func TestTextInputClientTouchScrollDismissesKeyboard(t *testing.T) {
+	for _, dy := range []float32{-40, 40} {
+		client := &primitiveClient{}
+		var total float32
+		tt := NewTester(func(c *Context) {
+			Box(c).Fill().HandleTextInput(client).TouchSelection().
+				InputOptions(InputOptions{Dismiss: KeyboardDismissOnDrag}).HandleInput(func(ev InputEvent) bool {
+				if ev.Kind == InputScroll {
+					total += ev.DY
+				}
+				return true
+			})
+		}, 320, 240)
+		touch(tt, platform.PointerDown, 1, 120, 100)
+		touch(tt, platform.PointerUp, 1, 120, 100)
+		if !tt.h.ime.Active {
+			t.Fatal("tap did not open client keyboard")
+		}
+		touch(tt, platform.PointerDown, 2, 120, 100)
+		touch(tt, platform.PointerMove, 2, 120, 100+dy)
+		if tt.h.ime.Active {
+			t.Fatal("client retained keyboard during vertical scroll")
+		}
+		tt.send(platform.SurfaceEvent{Kind: platform.SurfaceResize})
+		touch(tt, platform.PointerMove, 2, 120, 100+2*dy)
+		touch(tt, platform.PointerUp, 2, 120, 100+2*dy)
+		if total != -2*dy || tt.rt.touch.active || client.text != "" {
+			t.Fatalf("client scroll interrupted or typed text: %v %q", total, client.text)
+		}
+		tt.rt.close()
+	}
+}

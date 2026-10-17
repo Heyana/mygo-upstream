@@ -87,3 +87,30 @@ func TestCustomTextCaretKeyboardOptions(t *testing.T) {
 		t.Fatal("custom input retained omitted keyboard options")
 	}
 }
+
+func TestTextInputClientKeyboardOptions(t *testing.T) {
+	client := &primitiveClient{}
+	options := InputOptions{Keyboard: KeyboardASCII, Return: ReturnSend,
+		Correction: CorrectionOff, Capitalization: CapitalizeNone, Dismiss: KeyboardDismissOnDrag}
+	tt := NewTester(func(c *Context) {
+		Box(c).Fill().HandleTextInput(client).AutoFocus().InputOptions(options)
+	}, 320, 200)
+	defer tt.rt.close()
+	if got := tt.h.ime; got.Client == nil || !got.Active || got.Options != options.nativeOptions() {
+		t.Fatalf("client keyboard options not forwarded: %+v", got)
+	}
+	tt.Type("中文👋")
+	if client.text != "中文👋" {
+		t.Fatalf("keyboard hint changed committed text: %q", client.text)
+	}
+	options = InputOptions{Keyboard: KeyboardEmail, Return: ReturnDone}
+	tt.Frame()
+	if tt.h.ime.Options != options.nativeOptions() {
+		t.Fatal("changed client keyboard options were not propagated")
+	}
+	options = InputOptions{}
+	tt.Frame()
+	if tt.h.ime.Options != (platform.TextInputOptions{}) {
+		t.Fatal("client retained omitted keyboard options")
+	}
+}

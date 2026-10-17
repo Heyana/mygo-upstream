@@ -1006,6 +1006,7 @@ func (rt *engine) updateTextInput() {
 	base := 0
 	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !rt.snapshotTextInput(s) && rt.windowFocus() && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
 		t.Active, t.Client, t.NoInputMethod = true, s.textAdapter, s.noIME
+		t.Options = s.inputOptions.nativeOptions()
 		sel := s.textAdapter.Selection()
 		caret := sel.Caret()
 		if bounds, _, ok := s.textAdapter.BoundsForRange(TextInputRange{Start: caret, End: caret}); ok {
