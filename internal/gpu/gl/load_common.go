@@ -3,14 +3,27 @@
 package gl
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"unsafe"
 )
+
+// errNoContext is what load reports when it ran with no GL context current:
+// the entry points cannot be resolved then, so it is a "try again later",
+// never a verdict. Android's load is the one that can tell the difference
+// (see load_android.go); the desktop loaders resolve through libepoxy, which
+// needs no context of ours.
+var errNoContext = fmt.Errorf("gl: no context is current")
 
 // The functions of libepoxy and GL this package calls.
 var (
 	loadOnce sync.Once
 	errLoad  error
+	// errLoadLatched tells that errLoad is a final answer (success, or a
+	// driver that really lacks the names), not a load that ran before a
+	// context existed. See load_android.go for the failure this prevents.
+	errLoadLatched bool
 
 	epoxyGLVersion    func() int32
 	epoxyIsDesktopGL  func() bool
@@ -91,4 +104,27 @@ func goString(p uintptr) string {
 		}
 		b = append(b, c)
 	}
+}
+
+// setShaderSource sets the source of a shader.
+func setShaderSource(s uint32, src string) {
+	b := append([]byte(src), 0)
+	p := &b[0]
+	glShaderSource(s, 1, &p, nil)
+}
+
+// shaderLog and programLog return what compiling a shader or linking a
+// program logged.
+func shaderLog(s uint32) string  { return infoLog(s, glGetShaderiv, glGetShaderInfoLog) }
+func programLog(p uint32) string { return infoLog(p, glGetProgramiv, glGetProgramInfoLog) }
+
+func infoLog(obj uint32, get func(uint32, uint32, *int32), read func(uint32, int32, *int32, *byte)) string {
+	var n int32
+	get(obj, glInfoLogLength, &n)
+	if n <= 1 {
+		return "no log"
+	}
+	buf := make([]byte, n)
+	read(obj, n, nil, &buf[0])
+	return strings.TrimSpace(string(buf[:n-1]))
 }

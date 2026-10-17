@@ -23,3 +23,17 @@ import "unsafe"
 func currentContext() uintptr {
 	return uintptr(unsafe.Pointer(C.eglGetCurrentContext()))
 }
+
+// contextVersion is what the renderer asks before it compiles shaders: an
+// Android context is ES by definition, and load_android.go answers the
+// version from GL_VERSION (esVersion).
+func contextVersion() (version int32, es bool) { return esVersion(), true }
+
+// hasExtension reports whether the current context has an extension.
+func hasExtension(name string) bool { return hasGLExtension(name) }
+
+// versionString describes the current context's version, for errors.
+func versionString() string { return goString(glGetString(glVersion)) }
+
+// rendererString names the current context's renderer.
+func rendererString() string { return goString(glGetString(glRenderer)) }

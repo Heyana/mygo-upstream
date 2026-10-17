@@ -37,6 +37,21 @@ func (c *Context) build() *context {
 // Valid reports whether this context is building a view.
 func (c *Context) Valid() bool { return c.build() != nil }
 
+// SafeArea is the room the device's own chrome — the status bar, a notch,
+// the gesture bar, an on-screen keyboard while it is up — takes from the
+// content, in DIPs. A view of its own reads it to keep what it draws out
+// from under that chrome; mygo measures it from the host's window insets
+// and never applies it for you, because a full-bleed surface such as a
+// terminal wants the room rather than the inset.
+//
+// It is zero on a window whose chrome takes none, which is every desktop.
+func (c *Context) SafeArea() SafeArea {
+	if raw := c.build(); raw != nil {
+		return raw.SafeArea()
+	}
+	return SafeArea{}
+}
+
 // Invalidate requests a frame from any goroutine.
 func (c *Context) Invalidate() {
 	if c != nil {

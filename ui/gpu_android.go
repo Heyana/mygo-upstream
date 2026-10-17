@@ -120,7 +120,6 @@ func (g *androidGPU) Render(s *scene.Scene) error {
 	start := time.Now()
 	err := g.gl.Render(s)
 	submitted := time.Since(start)
-	lap(phaseSubmit, submitted)
 	probe.At("gpu/submit", submitted)
 	if err != nil {
 		return err
@@ -146,7 +145,6 @@ func (g *androidGPU) Render(s *scene.Scene) error {
 			// almost no wait here. And it is not a second cost beside
 			// gpu/clear, which waits on the same swap from the other side;
 			// the two are one wait split by the GPU work between them.
-			lap(phaseSwap, swapped)
 			probe.At("gpu/swap", swapped)
 		}
 	}
