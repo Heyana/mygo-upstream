@@ -644,6 +644,11 @@ static const NSUInteger MyGoAccessoryColumns = 6;
     self.backgroundColor = UIColor.systemBackgroundColor;
     self.displayLink = [CADisplayLink displayLinkWithTarget:self
                                                    selector:@selector(tick:)];
+    // Prefer 120 Hz for Go-driven frames; the system may choose a lower rate.
+    if (@available(iOS 15.0, *)) {
+      self.displayLink.preferredFrameRateRange =
+          CAFrameRateRangeMake(60, 120, 120);
+    }
     self.displayLink.paused = YES;
     [self.displayLink addToRunLoop:NSRunLoop.mainRunLoop
                            forMode:NSRunLoopCommonModes];

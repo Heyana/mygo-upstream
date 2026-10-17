@@ -257,7 +257,9 @@ func iosInfoPlist(c *Config, minimum string) []byte {
 		"CFBundleExecutable": "$(EXECUTABLE_NAME)", "CFBundlePackageType": "APPL",
 		"CFBundleShortVersionString": c.Version, "CFBundleVersion": iosBuildNumber(c),
 		"MinimumOSVersion": minimum, "LSRequiresIPhoneOS": true,
-		"UILaunchStoryboardName": "LaunchScreen",
+		// iPhone requires this opt-in for display-link frame rates above 60 Hz.
+		"CADisableMinimumFrameDurationOnPhone": true,
+		"UILaunchStoryboardName":               "LaunchScreen",
 		"MyGoLaunchScreen": map[string]any{
 			"Title": iosLaunchTitle(c), "Image": c.IOS.LaunchScreen.Image != "",
 			"BackgroundColor": c.IOS.LaunchScreen.BackgroundColor,
