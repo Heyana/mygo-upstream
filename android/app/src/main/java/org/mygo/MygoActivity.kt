@@ -1,6 +1,7 @@
 package org.mygo
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.Window
@@ -79,6 +80,17 @@ class MygoActivity : Activity() {
 
         // 平台能力（剪贴板/URL/通知/无障碍）的 Java 侧握手；必须在任何平台能力被使用前调用。
         MygoPlatform.install(this, view)
+    }
+
+    /**
+     * 把系统应用的返回结果转给平台侧：扫码就是从这里回到 Go 的。
+     *
+     * 用旧 API 而不是 registerForActivityResult：这里只转发，不关心生命周期，
+     * 而旧 API 在 `Activity`（非 ComponentActivity）上不需要额外依赖。
+     */
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        MygoPlatform.onScanResult(requestCode, resultCode, data)
     }
 
     override fun onResume() {

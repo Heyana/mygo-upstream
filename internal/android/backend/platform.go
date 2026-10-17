@@ -53,6 +53,11 @@ import (
 // does support the feature; the app just did not wire it up.
 var ErrPlatformBridge = errors.New("mygo: the Android platform bridge is not attached")
 
+// ErrScanUnavailable is the Java side saying it cannot open the picker at all:
+// no activity to start it, or the system refused. It is not the person
+// cancelling, which is what ScanCode's callback reports for that.
+var ErrScanUnavailable = errors.New("mygo: Android could not open the image picker")
+
 // PlatformBridge is the Java half of the platform features: ClipboardManager,
 // the ACTION_VIEW intent, NotificationManager and the accessibility provider,
 // as internal/android's JNI implementation of it exposes them.
@@ -119,6 +124,16 @@ type PlatformBridge interface {
 	SecretSet(namespace, key string, value []byte, accessibility string) error
 	SecretGet(namespace, key string) ([]byte, error)
 	SecretDelete(namespace, key string) error
+
+	// ScanCode opens the system's image picker for a picture of a QR code and
+	// reports what it holds, later, through ScanResult with the same token.
+	// The prompt is the picker's title where the platform takes one.
+	//
+	// It returns as soon as the picker is up: the answer arrives as a JNI
+	// entry point, on the pump, like every other platform callback.
+	ScanCode(token uint64, prompt string) error
+	// ScanCancel dismisses the picker opened for token, if it is still up.
+	ScanCancel(token uint64) error
 }
 
 // ClipboardPayload is what Android's clipboard holds of what this backend can

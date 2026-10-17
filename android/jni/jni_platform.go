@@ -59,6 +59,8 @@ static jmethodID mygo_mid_set_tree = NULL;
 static jmethodID mygo_mid_secret_set = NULL;
 static jmethodID mygo_mid_secret_get = NULL;
 static jmethodID mygo_mid_secret_delete = NULL;
+static jmethodID mygo_mid_scan = NULL;
+static jmethodID mygo_mid_scan_cancel = NULL;
 
 // mygo_platform_exception clears a pending Java exception and reports whether
 // there was one.
@@ -467,6 +469,8 @@ static jint mygo_platform_attach(JNIEnv *env, jobject thiz) {
 		{"secretSet", "([B[B[BI)Z", &mygo_mid_secret_set},
 		{"secretGet", "([B[B)[B", &mygo_mid_secret_get},
 		{"secretDelete", "([B[B)Z", &mygo_mid_secret_delete},
+		{"startScan", "(J[B)Z", &mygo_mid_scan},
+		{"cancelScan", "(J)Z", &mygo_mid_scan_cancel},
 	};
 	int count = (int)(sizeof(lookups) / sizeof(lookups[0]));
 	for (int n = 0; n < count; n++) {
@@ -522,6 +526,35 @@ static char *mygo_platform_secret_get(const char *ns, int ns_len, const char *ke
 }
 static jint mygo_platform_secret_delete(const char *ns, int ns_len, const char *key, int key_len) {
 	return mygo_platform_call_secret_delete(mygo_mid_secret_delete, ns, ns_len, key, key_len);
+}
+// startScan(long token, byte[] prompt) opens the picker; the answer comes back
+// through Java_org_mygo_MygoPlatform_nativeScanResult, not as a return value.
+static jint mygo_platform_scan(jlong token, const char *prompt, int prompt_len) {
+	JNIEnv *env = mygo_platform_env();
+	if (env == NULL || mygo_platform_obj == NULL || mygo_mid_scan == NULL) {
+		return -1;
+	}
+	jbyteArray p = mygo_platform_arg(env, prompt, prompt_len);
+	if (p == NULL) {
+		return -1;
+	}
+	jboolean ok = (*env)->CallBooleanMethod(env, mygo_platform_obj, mygo_mid_scan, token, p);
+	(*env)->DeleteLocalRef(env, p);
+	if (mygo_platform_exception(env)) {
+		return -1;
+	}
+	return ok == JNI_TRUE ? 0 : 1;
+}
+static jint mygo_platform_scan_cancel(jlong token) {
+	JNIEnv *env = mygo_platform_env();
+	if (env == NULL || mygo_platform_obj == NULL || mygo_mid_scan_cancel == NULL) {
+		return -1;
+	}
+	jboolean ok = (*env)->CallBooleanMethod(env, mygo_platform_obj, mygo_mid_scan_cancel, token);
+	if (mygo_platform_exception(env)) {
+		return -1;
+	}
+	return ok == JNI_TRUE ? 0 : 1;
 }
 */
 import "C"
@@ -781,6 +814,42 @@ func (androidJNI) SecretDelete(namespace, key string) error {
 		return nil
 	}
 	return errSecretStore
+}
+
+// ScanCode opens the system's image picker through the bridge.
+func (androidJNI) ScanCode(token uint64, prompt string) error {
+	if !attached() {
+		return backend.ErrPlatformBridge
+	}
+	p, n := cBytes(prompt)
+	defer cFree(p)
+	switch C.mygo_platform_scan(C.jlong(token), p, n) {
+	case -1:
+		return backend.ErrPlatformBridge
+	case 0:
+		return nil
+	}
+	return backend.ErrScanUnavailable
+}
+
+// ScanCancel takes the picker down, if it is still up.
+func (androidJNI) ScanCancel(token uint64) error {
+	if !attached() {
+		return backend.ErrPlatformBridge
+	}
+	if C.mygo_platform_scan_cancel(C.jlong(token)) < 0 {
+		return backend.ErrPlatformBridge
+	}
+	return nil
+}
+
+//export Java_org_mygo_MygoPlatform_nativeScanResult
+func Java_org_mygo_MygoPlatform_nativeScanResult(env *C.JNIEnv, cls C.jclass, token C.jlong, text *C.char, code C.jint) {
+	t := C.GoString(text)
+	c := int32(code)
+	// On the pump, as every platform callback is: the done this answers may
+	// touch the app's state and its view.
+	theBackend.Post(func() { backend.ScanResult(uint64(token), t, c) })
 }
 
 // accessibilityCode maps mygo's accessibility to the int the Java side takes.

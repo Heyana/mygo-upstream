@@ -52,6 +52,20 @@ type fakeBridge struct {
 
 	secrets   map[string][]byte
 	secretErr error
+
+	scanned    []string
+	scanErr    error
+	scanCancel []uint64
+}
+
+func (f *fakeBridge) ScanCode(token uint64, prompt string) error {
+	f.scanned = append(f.scanned, prompt)
+	return f.scanErr
+}
+
+func (f *fakeBridge) ScanCancel(token uint64) error {
+	f.scanCancel = append(f.scanCancel, token)
+	return nil
 }
 
 func (f *fakeBridge) SecretSet(namespace, key string, value []byte, accessibility string) error {

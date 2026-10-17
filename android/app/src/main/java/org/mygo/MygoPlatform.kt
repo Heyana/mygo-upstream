@@ -13,6 +13,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.MediaStore
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.NotFoundException
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import android.graphics.Rect
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -953,6 +959,10 @@ object MygoPlatform {
     private fun Manifest_permission_POST_NOTIFICATIONS(): String =
         "android.permission.POST_NOTIFICATIONS"
 
+    private const val SCAN_REQUEST = 0x5CA9
+    private const val SCAN_OK = 0
+    private const val SCAN_CANCELED = 5
+    private const val SCAN_NOT_FOUND = 2
     private const val KEY_ALIAS = "mygo-secrets-v1"
     private const val GCM_IV_LEN = 12
     private const val GCM_TAG_BITS = 128
@@ -969,6 +979,114 @@ object MygoPlatform {
 
     /** 无障碍动作（参数是动作名字的 UTF-8 字节，名字见 accessActionKinds）。 */
     private external fun nativeAccessibilityAction(id: Long, action: ByteArray)
+
+    /** 扫码结果回传：token 对应 Go 侧的请求，code 见 ScanResult 的注释。 */
+    private external fun nativeScanResult(token: Long, text: ByteArray, code: Int)
+
+    // ── 扫码（系统相机/相册 + 解码）─────────────────────────────────────
+    //
+    // 不做自己的相机预览：用系统相机拍一张、或用相册里已有的照片，再解码。
+    // 好处是**不需要 CAMERA 权限**（拍照的是相机应用，权限归它）、没有预览
+    // 层的生命周期要管、也不用把相机栈编进来。
+    //
+    // 解码用 ZXing core（纯 Java，无 NDK）。它不依赖任何 UI，也不申请权限。
+
+    private var scanToken: Long = 0
+    private var pendingScanToken: Long = 0
+
+    /**
+     * 打开取景界面。返回 false 表示连 Intent 都起不来（没有相机应用、被策略拦）。
+     *
+     * 真正的结果异步回到 [onScanPicked]，那时才调 nativeScanResult。
+     */
+    fun startScan(token: Long, prompt: ByteArray): Boolean {
+        val ctx = activity ?: return false
+        pendingScanToken = token
+        return try {
+            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+            if (intent.resolveActivity(ctx.packageManager) == null) {
+                // 没有相机应用：退回相册。
+                Intent(
+                    Intent.ACTION_PICK,
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                )
+            } else {
+                intent
+            }.let { pick ->
+                scanToken = token
+                ctx.startActivityForResult(pick, SCAN_REQUEST)
+                true
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("mygo", "startScan failed: $e")
+            false
+        }
+    }
+
+    /** 取景界面被收起，但没有结果（用户返回）。 */
+    fun cancelScan(token: Long): Boolean {
+        if (pendingScanToken != token) return false
+        pendingScanToken = 0
+        onUi { nativeScanResult(token, ByteArray(0), SCAN_CANCELED) }
+        return true
+    }
+
+    /**
+     * Activity 的 onActivityResult 转发进来。
+     *
+     * 解码在后台线程做：一张 4000×3000 的照片解码要几十到几百毫秒，放在主线程
+     * 会卡住界面。
+     */
+    fun onScanResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != SCAN_REQUEST) return
+        val token = pendingScanToken
+        pendingScanToken = 0
+        if (token == 0L) return
+        val ctx = activity
+        if (resultCode != Activity.RESULT_OK || data == null || ctx == null) {
+            nativeScanResult(token, ByteArray(0), SCAN_CANCELED)
+            return
+        }
+        // 拍照给的是缩略图（data.extras 的 "data"），相册给的是 Uri；两者都试。
+        @Suppress("DEPRECATION")
+        val thumb = data.extras?.get("data") as? android.graphics.Bitmap
+        val uri = data.data
+        Thread {
+            val text = try {
+                val bitmap = when {
+                    thumb != null -> thumb
+                    uri != null -> MediaStore.Images.Media.getBitmap(ctx.contentResolver, uri)
+                    else -> null
+                }
+                bitmap?.let { decodeQr(it) }
+            } catch (e: Exception) {
+                android.util.Log.w("mygo", "scan decode failed: $e")
+                null
+            }
+            onUi {
+                if (text.isNullOrEmpty()) {
+                    nativeScanResult(token, ByteArray(0), SCAN_NOT_FOUND)
+                } else {
+                    nativeScanResult(token, text.toByteArray(Charsets.UTF_8), SCAN_OK)
+                }
+            }
+        }.start()
+    }
+
+    /** 用 ZXing 在一张位图里找 QR 码；找不到返回 null。 */
+    private fun decodeQr(bitmap: android.graphics.Bitmap): String? {
+        val w = bitmap.width
+        val h = bitmap.height
+        val pixels = IntArray(w * h)
+        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+        val source = RGBLuminanceSource(w, h, pixels)
+        val binary = BinaryBitmap(HybridBinarizer(source))
+        return try {
+            MultiFormatReader().decode(binary).text
+        } catch (e: NotFoundException) {
+            null
+        }
+    }
 
     // ── 安全存储（Keystore）─────────────────────────────────────────────
     //

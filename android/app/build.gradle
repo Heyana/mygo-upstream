@@ -129,3 +129,9 @@ android {
         }
     }
 }
+
+// 扫码解码用 ZXing core：纯 Java、无 NDK、不申请权限。
+// 不引 camera-x / ML Kit —— 这里只解码已经拿到的一张图，不需要相机栈。
+dependencies {
+    implementation 'com.google.zxing:core:3.5.3'
+}
