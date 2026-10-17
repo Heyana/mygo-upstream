@@ -138,16 +138,18 @@ android {
 // 扫码解码用 ZXing core：纯 Java、无 NDK、不申请权限。
 // 不引 camera-x / ML Kit —— 这里只解码已经拿到的一张图，不需要相机栈。
 dependencies {
-    // FileProvider：把 cache 里的照片以 content:// 交给系统相机写。
-    // 只为了这一个类也值得——手写 content provider 是更多代码、更容易错。
+    // FileProvider：把外部缓存里的照片以 content:// 交给系统相机写。
+    //
+    // 只为这一个类引入整个 androidx.core —— 但它是**拍照路径的必要条件**：
+    // 没有它就只能给相机一个 file:// Uri，而 targetSdk≥24 会抛
+    // FileUriExposed。相机路径本身是必需的（没有照片选择器的设备、或用户
+    // 就想现拍），两条路径也都实测通过，所以这个依赖不能省。
     implementation 'androidx.core:core:1.13.1'
 
-    // 二维码解码用 OpenCV 的 QRCodeDetector。
+    // 二维码解码：ZXing core，纯 Java，无原生库。
     //
-    // 为什么不用 ZXing：实测同一张 3072×4096 的清晰照片，OpenCV 能解出
-    // retty://connect?address=tcpGFw... ，ZXing（RGBLuminanceSource +
-    // HybridBinarizer）返回 null，转灰度后仍然 null。ZXing 对「拍屏幕」
-    // 这类低对比度、带摩尔纹的输入就是不如 OpenCV 稳。
-    // AAR 里的 .so 只有 2MB 左右，且已按 16KB 页对齐（AGP 8+ 自动处理）。
-    implementation 'org.opencv:opencv:4.11.0'
+    // 曾一度换成 OpenCV（QRCodeDetector），理由是「同一张照片 ZXing 解不出」。
+    // 复测后那个结论不成立：相册预览页那张 OpenCV 反而 0 命中、ZXing 命中；
+    // 对规范码做 9 种劣化两者全过。体积差 21.6MB vs 0.58MB，没有理由多付。
+    implementation 'com.google.zxing:core:3.5.3'
 }

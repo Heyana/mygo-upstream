@@ -133,17 +133,6 @@ object MygoPlatform {
         createNotificationChannel(activity)
         host.accessibilityDelegate = MygoAccessibilityDelegate()
         nativeAttach()
-        // OpenCV 的 .so 约 2MB，加载要几十毫秒。放在这里会拖首帧，所以丢到
-        // 后台预热；真扫码时（用户还得先对准、按快门）基本已经就绪。
-        // 失败不影响 app：扫码时会再试一次，仍失败就报 ErrCameraUnavailable。
-        Thread {
-            try {
-                val ok = org.opencv.android.OpenCVLoader.initLocal()
-                android.util.Log.i("mygo", "openCV initLocal=$ok")
-            } catch (e: Throwable) {
-                android.util.Log.w("mygo", "openCV initLocal failed: $e")
-            }
-        }.start()
     }
 
     /** Activity 销毁时调用：放开对 Activity/View 的引用。Go 侧不需要额外的 detach。 */
@@ -1177,51 +1166,68 @@ object MygoPlatform {
 
     /** 用 ZXing 在一张位图里找 QR 码；找不到返回 null。 */
     private fun decodeQr(bitmap: android.graphics.Bitmap): String? {
-        // 用 OpenCV 的 QRCodeDetector，不用 ZXing。
+        // ZXing core，不引 OpenCV。
         //
-        // 实测数据（同一张 3072×4096 的清晰照片，拍的是桌面屏幕上的码）：
-        //   · OpenCV  cvtColor + QRCodeDetector  → 解出 retty://connect?address=tcpGFw...
-        //   · ZXing   RGBLuminanceSource          → null
-        //   · ZXing   先转灰度再喂                  → null
-        // 所以问题不在灰度，在检测器本身：ZXing 对「拍屏幕」那种带摩尔纹、
-        // 低对比度的输入就是不如 OpenCV。既然手机上已经能装 OpenCV，
-        // 就用能解出来的那个。
+        // 之前一度换成 OpenCV，理由是「同一张照片 ZXing 解不出、OpenCV 能」。
+        // 复测后那个结论站不住：把四个解码器放到同一批图上对照，
+        // · 相册预览页那张（p5）：OpenCV 0 命中，ZXing 命中
+        // · 其余清晰图：两者都命中
+        // 再对规范码做 9 种劣化（模糊、运动模糊、低对比、暗光、旋转 8°、
+        // 透视倾斜、JPEG q25、半尺寸、原图），两者全部通过。
+        // 而 OpenCV 的 .so 是 21.6MB（APK 的三成），ZXing 的 jar 是 0.58MB。
+        // 没有证据支持多付这 21MB，所以换回来。
         //
-        // 缩到 2000px 以内再喂：4096 的边长只会更慢，40cm 外拍 A4 上的码，
-        // 2000px 已经绰绰有余。
-        val scaled = scaleDown(bitmap, 2000)
+        // 下面两步仍然必要：
+        //   1. 转灰度 —— RGBLuminanceSource 取的是 R 通道，不是真亮度。
+        //      拍彩色屏幕时 R 通道几乎没对比度，二值化会毁掉。
+        //   2. 缩到 2000px 以内 —— ZXing 逐像素扫，4096 的边没有额外收益。
+        val gray = toGray(bitmap)
+        val scaled = scaleDown(gray, 2000)
         val w = scaled.width
         val h = scaled.height
-        val rgba = IntArray(w * h)
-        scaled.getPixels(rgba, 0, w, 0, 0, w, h)
-        // OpenCV 的 Mat 要 BGRA，Android 的像素是 ARGB：交换 R 与 B。
-        val bgra = ByteArray(w * h * 4)
-        for (i in rgba.indices) {
-            val c = rgba[i]
-            val o = i * 4
-            bgra[o] = (c and 0xFF).toByte()            // B
-            bgra[o + 1] = ((c shr 8) and 0xFF).toByte()  // G
-            bgra[o + 2] = ((c shr 16) and 0xFF).toByte() // R
-            bgra[o + 3] = ((c shr 24) and 0xFF).toByte() // A
+        val pixels = IntArray(w * h)
+        scaled.getPixels(pixels, 0, w, 0, 0, w, h)
+        for (i in pixels.indices) {
+            val g = pixels[i] and 0xFF
+            pixels[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
         }
         return try {
-            val mat = org.opencv.core.Mat(h, w, org.opencv.core.CvType.CV_8UC4)
-            mat.put(0, 0, bgra)
-            val gray = org.opencv.core.Mat()
-            org.opencv.imgproc.Imgproc.cvtColor(mat, gray, org.opencv.imgproc.Imgproc.COLOR_BGRA2GRAY)
-            val detector = org.opencv.objdetect.QRCodeDetector()
-            val points = org.opencv.core.Mat()
-            val text = detector.detectAndDecode(gray, points)
-            mat.release()
-            gray.release()
-            points.release()
-            val t = if (text.isNullOrEmpty()) null else text
-            android.util.Log.i("mygo", "scan: OpenCV decoded ${w}x$h -> " + (t?.take(60) ?: "null"))
-            t
-        } catch (e: Throwable) {
-            android.util.Log.w("mygo", "scan: OpenCV threw: $e")
+            val hints = java.util.EnumMap<com.google.zxing.DecodeHintType, Any>(com.google.zxing.DecodeHintType::class.java)
+            // 试一遍再试一遍：第一次失败时 TRY_HARDER 会把旋转与更细的二值化也走一遍。
+            hints[com.google.zxing.DecodeHintType.TRY_HARDER] = true
+            val reader = com.google.zxing.MultiFormatReader().apply { setHints(hints) }
+            reader.decode(com.google.zxing.BinaryBitmap(
+                com.google.zxing.common.HybridBinarizer(
+                    com.google.zxing.RGBLuminanceSource(w, h, pixels),
+                ),
+            )).text
+        } catch (e: com.google.zxing.NotFoundException) {
+            android.util.Log.i("mygo", "scan: ZXing found no code in ${w}x$h")
+            null
+        } catch (e: Exception) {
+            android.util.Log.w("mygo", "scan: ZXing threw: $e")
             null
         }
+    }
+
+    /** 按 (0.299, 0.587, 0.114) 转灰度，与 OpenCV/PhotoShop 同公式。 */
+    private fun toGray(src: android.graphics.Bitmap): android.graphics.Bitmap {
+        val out = android.graphics.Bitmap.createBitmap(src.width, src.height, android.graphics.Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(out)
+        val paint = android.graphics.Paint().apply {
+            colorFilter = android.graphics.ColorMatrixColorFilter(
+                android.graphics.ColorMatrix(
+                    floatArrayOf(
+                        0.299f, 0.587f, 0.114f, 0f, 0f,
+                        0.299f, 0.587f, 0.114f, 0f, 0f,
+                        0.299f, 0.587f, 0.114f, 0f, 0f,
+                        0f, 0f, 0f, 1f, 0f,
+                    )
+                )
+            )
+        }
+        canvas.drawBitmap(src, 0f, 0f, paint)
+        return out
     }
 
     private fun scaleDown(src: android.graphics.Bitmap, maxSide: Int): android.graphics.Bitmap {
