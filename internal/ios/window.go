@@ -77,8 +77,12 @@ func (w *window) Bounds() platform.Rect {
 	return platform.Rect{Width: int(x), Height: int(y)}
 }
 func (w *window) ContentBounds() platform.Rect { return w.Bounds() }
-func (w *window) SetTitle(s string)            { w.title = s }
-func (w *window) Title() string                { return w.title }
+
+// UIKit already sizes the content view inside the safe area.
+func (*window) SafeArea() platform.SafeArea { return platform.SafeArea{} }
+
+func (w *window) SetTitle(s string) { w.title = s }
+func (w *window) Title() string     { return w.title }
 func (w *window) SetBackgroundColor(c platform.Color) {
 	C.mygo_ios_background(C.uintptr_t(w.view), C.double(c.R)/255, C.double(c.G)/255, C.double(c.B)/255, C.double(c.A)/255)
 }

@@ -1,8 +1,10 @@
-//go:build ios || (!windows && !darwin && !android && !(linux && (amd64 || arm64)) && !(js && wasm))
+//go:build (android && !cgo) || (ios && !cgo) || (!windows && !darwin && !android && !(linux && (amd64 || arm64)) && !(js && wasm))
 
 package ui
 
 import (
+	"errors"
+
 	"github.com/egoist/mygo/internal/platform"
 )
 

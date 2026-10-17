@@ -1,4 +1,4 @@
-//go:build (android && !cgo) || ios || (!darwin && !(linux && (amd64 || arm64)) && !(windows && (amd64 || arm64)) && !(js && wasm))
+//go:build (android && !cgo) || (ios && !cgo) || (!darwin && !(linux && (amd64 || arm64)) && !(windows && (amd64 || arm64)) && !(js && wasm))
 
 package mygo
 
