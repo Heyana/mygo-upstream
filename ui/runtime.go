@@ -58,6 +58,9 @@ type host interface {
 	// as its language reads.
 	rightToLeft() bool
 	titleBar() TitleBar
+	// safeArea returns the room the device's chrome takes from the
+	// content: a status bar, a notch, a home indicator. Zero on a desktop.
+	safeArea() SafeArea
 	// vibrancy reports whether the window shows a material where the
 	// frames are transparent.
 	vibrancy() bool
@@ -83,6 +86,8 @@ type host interface {
 // the view function, lays them out, paints them and routes input to the
 // elements of the last frame. Main thread only, except where noted.
 type engine struct {
+	// gestures are the pinch and rotation captures in progress, by the
+	// kind of gesture the surface named (gesture.go).
 	gestures map[string]gestureCapture
 	// inlineRects is placeInline's scratch, kept from frame to frame.
 	inlineRects []text.Rect
@@ -288,6 +293,9 @@ type engine struct {
 	// was built. The host's repaintTimer asks for a frame at repaintDue,
 	// unless one came or was asked for since. held tells that what moves
 	// waits for the window to show.
+	// was built. repaintTimer asks for a frame at repaintDue, unless one
+	// came or was asked for since. held tells that what moves waits for
+	// the window to show.
 	animating  bool
 	repainting bool
 	repaintAt  time.Time
@@ -296,6 +304,15 @@ type engine struct {
 	painted    [3]float32
 	gen        uint64
 	repaintDue time.Time
+	// wanted is set by whatever asks for a frame — an event, a view that
+	// changed, a timer coming due — and cleared when the frame that consumed
+	// it is drawn. A surface frame that arrives with it false and nothing
+	// moving is a frame nothing wants and is dropped (see surfaceFrame).
+	wanted bool
+	// paintedFrame tells that a frame has been drawn at least once: a window
+	// that has never painted must paint, whatever asked (see surfaceFrame).
+	paintedFrame bool
+	repaintTimer *time.Timer
 	// late is set when lists built elements while laying out.
 	late bool
 	// revealIDs are the elements to scroll into view once the frame is
@@ -335,6 +352,13 @@ type engine struct {
 	access     bool
 	blinkStart time.Time
 	inFrame    bool
+	// repainted marks a frame that painted again without rebuilding, so
+	// endFrame can count it apart (a display shows those separately: they
+	// are cheap, and a run of them is why a rate can read low).
+	repainted bool
+	// frameStart is when the frame being run began, which endFrame reads
+	// into the diagnostics average (diagnostics.go).
+	frameStart time.Time
 	dark       bool
 	darkKnown  bool
 	// prefs are the desktop's preferences, read once until they change.
@@ -461,6 +485,7 @@ func (rt *engine) runFrame() {
 		return
 	}
 	rt.inFrame = true
+	rt.frameStart = time.Now()
 	defer rt.endFrame()
 
 	rt.frame++
@@ -472,6 +497,11 @@ func (rt *engine) runFrame() {
 	appW := rt.insp.contentWidth(w)
 	rt.insp.lap(-1)
 	rt.c.titleBar = rt.host.titleBar()
+	// Read every frame like the title bar, and for a sharper reason: the
+	// safe area changes with the window (rotation, a soft keyboard, a
+	// fold), and a value cached at start-up would leave a page padded for
+	// the orientation it was built in.
+	rt.c.safeArea = rt.host.safeArea()
 	rt.c.vibrancy = rt.host.vibrancy()
 	rt.text.BeginFrame()
 	rt.gen = rt.text.Generation()
@@ -562,6 +592,13 @@ func (rt *engine) runFrame() {
 	}
 	rt.stats.lap(phasePaint)
 	rt.insp.lap(2)
+	rt.insp.lap(2) // Count the ops before the scene is handed over, and before the next
+	// frame resets it: the count is of this frame's paint, and what the
+	// raster and present phases then cost is divided by it.
+	//
+	// upstream's frameStats counts its phases in end() and has no setOps:
+	// the op count this called with came from a diagnostics pass that is
+	// kept in ui/diagnostics.go, which reads the scene itself.
 	rt.host.present(&rt.scene)
 	rt.placeWebViews()
 	rt.stats.lap(phasePresent)
@@ -662,9 +699,11 @@ func (rt *engine) surfaceFrame() {
 // armed them.
 func (rt *engine) repaintFrame(w, h, scale float32) {
 	rt.inFrame = true
+	rt.repainted = true
+	rt.frameStart = time.Now()
 	defer rt.endFrame()
 	rt.stats.begin(rt)
-	start := time.Now()
+	start := rt.frameStart
 	rt.c.now = rt.now()
 	rt.text.BeginFrame()
 	rt.repainting, rt.repaintAt = false, time.Time{}
@@ -882,6 +921,8 @@ func (rt *engine) close() {
 // during it.
 func (rt *engine) endFrame() {
 	rt.inFrame = false
+	recordFrameTime(time.Since(rt.frameStart), rt.repainted)
+	rt.repainted = false
 	if rt.closing {
 		rt.close()
 	}
@@ -956,6 +997,10 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	s.cursor, s.tip = e.cursor, e.tip
 	s.webView = e.webView
 	s.role = e.role
+	// The element asks for gestures for this frame only, so an element that
+	// stops calling Gestures stops receiving: what is left in s.gestures is
+	// what this frame's build will read (gesture.go's updateGestures).
+	s.gestureEnabled = e.gestureEnabled
 	s.input, s.caret, s.takesText, s.noIME = e.inputFn, e.caret, e.takesText, e.noIME
 	s.caretFn = e.caretFn
 	s.textContext = e.textContext

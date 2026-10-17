@@ -97,6 +97,34 @@ type IdleSurface interface {
 	Idle()
 }
 
+// SwapIntervalSurface is a Surface whose present blocks until a vsync, and
+// which can be told not to (Android's EGL). Optional because only EGL works
+// this way: GTK's area and a Windows swap chain present on their own
+// schedule and have no interval to set.
+//
+// It exists for measurement: with the interval at its default the present
+// span reads the frame's waiting, which is the frame's *pacing* and not its
+// work — a frame that lands just after a vsync waits most of an interval,
+// one in a steady stream waits almost none. Setting it to 0 separates the
+// two, and the pair of readings is what says whether a frame is slow or
+// merely early.
+type SwapIntervalSurface interface {
+	// SetSwapInterval is how many vsyncs the present waits for: 1 is the
+	// default and 0 returns as soon as the buffer is handed over.
+	SetSwapInterval(n int)
+}
+
+// FramePresenter is a surface whose frames drawn on the GPU need showing
+// when the renderer is done with them. EGL is such a renderer: unlike GTK's
+// GtkGLArea (which swaps for its area) and a Windows swap chain (which
+// presents on its own), it leaves the swap to the code that drew, so a
+// window drawing on the GPU has to say when.
+type FramePresenter interface {
+	// SetPresented tells the surface a finished frame is in the renderer's
+	// back buffer, so it can be put on the screen.
+	SetPresented()
+}
+
 // TextInputState is the state of the text input that has the keyboard,
 // for input methods.
 type TextInputState struct {
@@ -193,6 +221,12 @@ type SurfaceNative struct {
 	// Context.ID), current while SurfaceFrame events are handled
 	// (browsers).
 	Canvas uintptr
+	// Present is the surface itself, when a frame drawn on the GPU needs
+	// showing by the drawing code (Android, where EGL leaves the swap to
+	// it — see FramePresenter). It is the one field here that is not a
+	// native pointer, because the thing the renderer has to reach is the
+	// surface, and it has no handle the renderer could call through.
+	Present Surface
 }
 
 // RectF is a rectangle in DIPs with fractional coordinates.

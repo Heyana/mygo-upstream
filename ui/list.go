@@ -63,6 +63,19 @@ type ListState struct {
 	// goes on from where it is as more comes, and the user scrolling stops
 	// it. It shows the end at once where the desktop asks for less motion.
 	FollowAnimation *Animation
+	// RowHeight is the height of a row, for a list whose rows are all the
+	// same height, as a GridView's are. Rows the list has not built yet are
+	// estimated at it, where a list of varied rows estimates them from the
+	// theme's spacing until the first ones are measured.
+	//
+	// A list that knows its row height should say so: the theme's spacing is
+	// a guess, and where it is smaller than the rows really are, the first
+	// frame fits more rows in the view than will show, builds them all, and
+	// the work of one frame becomes the work of the list — a grid of
+	// pictures estimated at a quarter of its row height decodes four
+	// screensful of them, and a grid whose rows are unmeasured builds up to
+	// listMaxRows of them whatever it holds.
+	RowHeight float32
 	// Selected, when set, lets a click choose a row, as Up, Down, Home and
 	// End do while the list has the keyboard focus, and Page Up and Page
 	// Down on Linux and Windows: *Selected is the chosen row, -1 for none,
@@ -506,7 +519,11 @@ func (s *ListState) sync(e *node, n int) {
 		s.selRow, s.lead, s.pivot = -1, -1, -1
 		s.header.row = -1
 	}
-	s.heights.def = float64(e.c.theme.Space(8))
+	if s.RowHeight > 0 {
+		s.heights.def = float64(s.RowHeight)
+	} else {
+		s.heights.def = float64(e.c.theme.Space(8))
+	}
 	if s.Key != nil && n > 0 {
 		if k := s.anchorKey; k != nil {
 			if j, ok := s.find(k, s.anchor, n); ok && j != s.anchor {

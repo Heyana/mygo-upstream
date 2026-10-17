@@ -312,18 +312,30 @@ func (h *windowHost) present(s *scene.Scene) {
 	h.armIdle(frameIdle)
 	h.useWide(s, now)
 	defer h.ready()
-	if h.render(s) {
-		h.path = "drawn on the GPU"
-		if h.degraded {
+	// The path is named on the way out, not on the way in: the frame
+	// statistics read it when the frame ends (framestats.go), and makeGPU —
+	// which decides the path — runs in here. Naming it before that made
+	// every frame's log name the path of the frame before it, so a window
+	// that had just started drawing on the GPU kept saying "drawn in
+	// memory" for a while, and the one honest line in the log was the one
+	// that was wrong.
+	defer func() {
+		switch {
+		case h.gpu != nil && h.onGPU && !h.degraded:
+			h.path = "drawn on the GPU"
+		case h.gpu != nil && h.onGPU:
 			h.path = "drawn by the GPU renderer in software"
+		default:
+			h.path = "drawn in memory"
 		}
 		if behind(h.gpu) {
 			h.path = "skipped to catch up with the display"
 			h.conn.Surface.RequestFrame()
 		}
+	}()
+	if h.render(s) {
 		return
 	}
-	h.path = "drawn in memory"
 	damage := h.soft.Render(s)
 	m := &h.soft.Image
 	if d, ok := h.conn.Surface.(platform.DamageSurface); ok {
@@ -709,6 +721,19 @@ func (h *windowHost) titleBar() TitleBar {
 	}
 	t := h.conn.TitleBar()
 	return TitleBar{Height: float32(t.Height), Left: float32(t.Left), Right: float32(t.Right)}
+}
+
+func (h *windowHost) safeArea() SafeArea {
+	if h.conn.SafeArea == nil {
+		return SafeArea{}
+	}
+	a := h.conn.SafeArea()
+	return SafeArea{
+		Top:    float32(a.Top),
+		Right:  float32(a.Right),
+		Bottom: float32(a.Bottom),
+		Left:   float32(a.Left),
+	}
 }
 
 func (h *windowHost) vibrancy() bool {

@@ -11,6 +11,9 @@ import (
 // event handles a surface event on the main thread. It reports whether
 // an element takes files dragged over or dropped at the event's position.
 func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
+	// A touch contact is arbitrated before the pointer path: it may become
+	// a scroll of a container, which the pointer path would have made a
+	// press of a row (touch.go).
 	if ev.PointerType == platform.PointerTouch && rt.touchEvent(ev) {
 		return rt.touch.scrolling
 	}
@@ -34,6 +37,12 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	case platform.SurfaceFrame:
 		rt.surfaceFrame()
 	case platform.SurfaceResize:
+		// A resize ends a contact that is selecting, or one that was about
+		// to scroll a container and has not begun: the boxes those were
+		// measured against are gone. A contact that is already scrolling
+		// goes on — the keyboard opening is the resize this happens on, and
+		// the finger that opened it is still on the surface, so ending the
+		// contact here would stop the scroll the tap began.
 		if rt.touch.active && (rt.touch.selecting || rt.touch.scrollTarget != 0 && !rt.touch.scrolling) {
 			rt.cancelPointer()
 			rt.touch.active = false
@@ -174,6 +183,7 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.accessAction(ev)
 	}
 	if ev.PointerType == platform.PointerTouch && (ev.Kind == platform.PointerUp || ev.Kind == platform.PointerCancel) {
+		// The finger left the surface: nothing hovers under it.
 		rt.pointerIn = false
 		rt.setHover(nil)
 	}
@@ -926,7 +936,20 @@ func (rt *engine) shortcut(id uint64, mods Modifiers, key Key) bool {
 
 func (rt *engine) editEvent(ev editEvent) {
 	if s := rt.states[rt.focused]; s != nil && s.textClient != nil && !ev.snapshot && !rt.snapshotTextInput(s) && rt.windowFocus() && s.flags&flagDisabled == 0 && (s.editor == nil || !s.editor.readOnly) {
-		if ev.kind == editInsert || ev.kind == editCompose {
+		// 🔴 An element that pairs HandleTextInput with HandleInput takes its
+		// text through HandleInput whenever a software modifier is held, so the
+		// combination is built where it always is: in deliver.
+		//
+		// This branch runs before deliver, so without it a Ctrl held on a
+		// software keyboard reached the client as plain text — Ctrl+c arrived
+		// as "c" and typed a letter instead of interrupting the program, and
+		// a terminal's Cmd+click lost its Cmd. Only a one-character commit is
+		// eligible, by the same rule deliver applies.
+		// The handler below adds the modifiers in deliver, which is also where
+		// inputConsumed is honoured.
+		viaHandler := ev.kind == editInsert && s.input != nil && s.inputModifiers != 0 &&
+			!s.inputComposing && len(ev.text) == 1 && ev.text[0] < 128
+		if !viaHandler && (ev.kind == editInsert || ev.kind == editCompose) {
 			var r *TextInputRange
 			if ev.replace {
 				v := TextInputRange{Start: ev.from, End: ev.to}

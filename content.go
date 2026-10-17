@@ -67,6 +67,22 @@ func (w *Window) attachContent() {
 			}
 			return w.native.TitleBar()
 		},
+		// 🔴 SafeArea is not gated on hiddenTitleBar the way TitleBar is,
+		// and that is the whole difference between the two: a title bar is
+		// this window's own controls, which only exist when the window was
+		// asked for a hidden one; the safe area is the *device's* chrome,
+		// which is there whatever the window asked for.
+		//
+		// It is nil on a backend that has not filled it in, and
+		// windowHost.safeArea treats nil as zero — the desktop answer. That
+		// is why leaving this line out is invisible on a desktop and wrong
+		// on a phone: the numbers are read, reported, and dropped here.
+		SafeArea: func() platform.SafeArea {
+			if w.native == nil {
+				return platform.SafeArea{}
+			}
+			return w.native.SafeArea()
+		},
 		OpenURL: func(url string, done func(error)) {
 			// The system may take a while, as Windows' shell does: not
 			// in the frame.

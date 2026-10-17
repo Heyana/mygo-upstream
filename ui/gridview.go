@@ -41,8 +41,12 @@ type GridState struct {
 	// cols is how many columns the items took in the last frame, and pivot
 	// the item Shift chooses from.
 	cols, pivot int
-	started     bool
-	rt          *engine
+	// cellGap is the space between two cells of a row, which coreGridView
+	// sets from the theme when it lays them out: it is what CellSize has
+	// to take out of the row's width to get a cell.
+	cellGap float32
+	started bool
+	rt      *engine
 }
 
 // ScrollTo scrolls the grid to show item at align, as ListState.ScrollTo
@@ -54,6 +58,65 @@ func (s *GridState) ScrollTo(item int, align Align) {
 // ScrollIntoView scrolls the grid as little as shows item.
 func (s *GridState) ScrollIntoView(item int) {
 	s.rows.ScrollIntoView(item / max(s.cols, 1))
+}
+
+// Visible returns the items the grid built in the last frame — first through
+// last, both inclusive, last -1 when it built none — and how many columns
+// they took. It reads the rows as ListState.Visible does, so call it after
+// the grid is built.
+//
+// The items just past last are the ones a scroll brings in next, which is
+// what a view that has work to do ahead of time — decoding the pictures of
+// the next screenful, say — prepares for:
+//
+//	first, last, cols := app.grid.Visible()
+//	for i := last + 1; i < min(len(shots), last+1+cols); i++ {
+//		prepare(i)
+//	}
+func (s *GridState) Visible() (first, last, cols int) {
+	first, last = s.rows.Visible()
+	cols = max(s.cols, 1)
+	if last < 0 {
+		return 0, -1, cols
+	}
+	// A row is whole, so the last row's items run to its last column,
+	// whether or not the grid has that many.
+	return first * cols, (last+1)*cols - 1, cols
+}
+
+// CellSize returns the width and height of a cell of the grid as the last
+// frame laid it out, in the units the view draws in, and whether it has been
+// laid out at all.
+//
+// The width is not the minimum a cell was asked to be: the columns share the
+// width the rows have, so a cell is wider than the minimum by whatever the
+// last column's share is, up to half again at the counts a window has. A
+// view that decodes a picture at the size of the cell that shows it —
+// DecodeBitmapSize, which is the difference between a library of a hundred
+// costing ten megabytes and costing fifty — is asking for the width this
+// returns, and asking for the minimum instead decodes every picture one
+// halving too large.
+//
+// It reads what the last frame measured, so call it after the grid is built;
+// before that there is no answer, and the second return is false.
+func (s *GridState) CellSize() (w, h float32, ok bool) {
+	if !s.rows.laidOut || s.rows.width <= 0 {
+		return 0, 0, false
+	}
+	cols := max(s.cols, 1)
+	// The cells and the gaps between them fill the row: the row's width
+	// less the gaps, over the columns. The gap is the grid's own (the one
+	// it lays its cells out with), not the rows' — rows.gap is the space
+	// between rows.
+	avail := s.rows.width - s.cellGap*float32(cols-1)
+	if avail <= 0 || s.rows.RowHeight <= 0 {
+		return 0, 0, false
+	}
+	// A grid's rows are all one height and that height is the cell's:
+	// coreGridView sets it to the cell's height plus the gap it draws
+	// around each, and the cell a caller can show a picture in is the
+	// height it was asked for.
+	return avail / float32(cols), s.rows.RowHeight - s.cellGap, true
 }
 
 // gridFit is how many columns a grid's items took, which its layout checks
@@ -96,6 +159,11 @@ func coreGridView(c *context, s *GridState, n int, minWidth, height float32, ite
 	wrapElement(e).Bind(&s.Handle)
 	n = max(n, 0)
 	gap := t.Space(2)
+	// A grid's rows are all one height — a cell of height high, plus the
+	// half gap above and below it — and saying so keeps the first frame,
+	// which has measured nothing yet, from estimating them at the theme's
+	// spacing and building several times the rows that fit.
+	s.rows.RowHeight = height + gap
 	// The columns: those that fit the width the rows had in the last
 	// frame, or the window's, first. The layout builds the next frame
 	// again where they changed.
@@ -109,7 +177,7 @@ func coreGridView(c *context, s *GridState, n int, minWidth, height float32, ite
 		first, _ := s.rows.Visible()
 		s.rows.ScrollTo(first*s.cols/cols, Start)
 	}
-	s.cols, s.started = cols, true
+	s.cols, s.started, s.cellGap = cols, true, gap
 	rows := (n + cols - 1) / cols
 	if s.Selected != nil {
 		e.Focusable()

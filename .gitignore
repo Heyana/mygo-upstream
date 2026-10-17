@@ -8,3 +8,12 @@ examples/*/build/
 packages/cli/npm/*/bin/
 .DS_Store
 mygo.ts
+
+# android/ 的构建产物（libmygo.so 由 scripts/android-build.sh 产出）
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/app/src/main/jniLibs/**/*.so
+# c-shared 同时产出这个头（Go 侧导出的 C 声明），同样是构建产物
+/android/app/src/main/jniLibs/**/*.h

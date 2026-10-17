@@ -423,7 +423,7 @@ func (s *surface) pointer(kind platform.SurfaceEventKind, lp uintptr, button int
 		w, h := systemMetric(smCxDoubleClk, s.hwnd), systemMetric(smCyDoubleClk, s.hwnd)
 		clicks = s.clicks.Press(button, float64(x), float64(y), uint32(at), platform.DoubleClick{Time: time.Duration(ms) * time.Millisecond, DX: float64(w) / 2, DY: float64(h) / 2})
 	}
-	s.send(platform.SurfaceEvent{Kind: kind, X: s.toDIP(int32(x)), Y: s.toDIP(int32(y)), Button: button, Clicks: clicks, Mods: mods()})
+	s.send(platform.SurfaceEvent{Kind: kind, PointerType: platform.PointerMouse, X: s.toDIP(int32(x)), Y: s.toDIP(int32(y)), Button: button, Clicks: clicks, Mods: mods()})
 }
 
 func (s *surface) message(hwnd uintptr, m uint32, wp, lp uintptr) (uintptr, bool) {
@@ -554,7 +554,7 @@ func (s *surface) message(hwnd uintptr, m uint32, wp, lp uintptr) (uintptr, bool
 		procScreenToClient.Call(hwnd, uintptr(unsafe.Pointer(&pt)))
 		delta := float64(int16(hiword(wp)))
 		dist := delta / 120 * float64(wheelLines()) * 33
-		ev := platform.SurfaceEvent{Kind: platform.PointerScroll, X: s.toDIP(pt.X), Y: s.toDIP(pt.Y), Mods: mods(), Precise: int(delta)%120 != 0}
+		ev := platform.SurfaceEvent{Kind: platform.PointerScroll, PointerType: platform.PointerMouse, X: s.toDIP(pt.X), Y: s.toDIP(pt.Y), Mods: mods(), Precise: int(delta)%120 != 0}
 		if m == wmMouseWheel {
 			ev.DY = -dist
 		} else {

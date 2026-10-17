@@ -209,6 +209,10 @@ const (
 // Common input queries return false or zero for nil or cleared elements;
 // this does not make references to reused storage safe.
 type node struct {
+	// gestureEnabled is set by Gestures: the element wants pinch and
+	// rotation updates, so the engine keeps routing a gesture to it after
+	// the fingers leave its box. Copied to the state each frame the element
+	// is built (see context.go's state.gestureEnabled).
 	gestureEnabled bool
 	router         *Router
 	routerLevel    int

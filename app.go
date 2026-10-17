@@ -96,7 +96,7 @@ func (a *Application) Run() error {
 	if host, ok := backend().(platform.ApplicationHost); ok {
 		return host.RunApplication(a.start, a.finish)
 	}
-	if !isMainThread() {
+	if !isMainThread() && !runFromAnyGoroutine() {
 		return errors.New("mygo: App.Run must be called from the main goroutine")
 	}
 	if err := a.start(); err != nil {

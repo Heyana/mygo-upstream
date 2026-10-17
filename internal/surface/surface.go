@@ -53,6 +53,9 @@ type Conn struct {
 	// TitleBar returns the room the window controls take in a window with
 	// a hidden title bar, zero in other windows.
 	TitleBar func() platform.TitleBar
+	// SafeArea returns the room the device's chrome takes from the content
+	// (a status bar, a notch, a home indicator), zero on a desktop.
+	SafeArea func() platform.SafeArea
 	// OpenURL opens a link in the default browser, and gives done, unless
 	// nil, what came of it on the main thread.
 	OpenURL func(url string, done func(error))
@@ -103,6 +106,8 @@ type Conn struct {
 	// LocaleChanged is called when Locale or Region changed, for the
 	// content to build its frame anew.
 	LocaleChanged func()
+	// SafeAreaChanged is called when SafeArea does.
+	SafeAreaChanged func()
 	// Capture renders the content as it is now into premultiplied RGBA.
 	Capture func() (width, height int, rgba []byte)
 	// ToggleDevTools opens or closes the content's inspector, for the

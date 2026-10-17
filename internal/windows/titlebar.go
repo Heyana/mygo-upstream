@@ -163,6 +163,12 @@ func (w *window) TitleBar() platform.TitleBar {
 	return platform.TitleBar{Height: w.titleBarHeight(), Right: captionButtonWidth * len(w.shownButtons())}
 }
 
+// SafeArea is zero on Windows: the taskbar, the window frame and the
+// caption buttons are all outside the client area, so nothing the system
+// draws comes over the content. (A window created with a custom frame can
+// put its own controls there, which is what TitleBar is for.)
+func (w *window) SafeArea() platform.SafeArea { return platform.SafeArea{} }
+
 // titleBarScript tells the first page the room of the window controls, at
 // document start.
 func (w *window) titleBarScript() string { return bridge.TitleBarScript(w.TitleBar(), w.opts.Zoom) }
