@@ -207,6 +207,12 @@ menu, clicks reach `OnClick`, and `OnRightClick` gets right-clicks. Change
 the tray with `SetIcon`, `SetMenu`, `SetToolTip` and, on macOS,
 `SetTitle`, the text next to the icon; `Destroy` removes it.
 
+An app may show several icons, as a menu bar app showing its measures each
+in an item of its own. On macOS a new icon goes left of those already
+there, and the user moves icons by dragging them with ⌘ held: give each an
+`ID`, unique among the app's icons, and it goes back where the user put it
+whenever it is made again, at the next launch or after `Destroy`.
+
 `Tray.PopUpMenu` opens the menu set with `SetMenu` programmatically. On
 macOS, AppKit places it below the status item and highlights its button
 while the menu is open. To show a menu only on right-click while keeping

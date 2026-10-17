@@ -98,6 +98,17 @@ func TestAccessibilityTree(t *testing.T) {
 	if f := accessNode(t, tt.h.access, platform.RoleTextField, ""); f.Value != "Grace" || f.SelStart != 5 || f.SelEnd != 5 || tt.h.access.Focus != f.ID {
 		t.Errorf("text field after setting it: %+v, focus %d", f, tt.h.access.Focus)
 	}
+	// Inserting text replaces the selection, as typing does: what
+	// assistive technology and automation type with AXSelectedText.
+	tt.send(platform.SurfaceEvent{Kind: platform.AccessAction, ID: field.ID, Action: platform.AccessSelectText, From: 0, To: 5})
+	tt.send(platform.SurfaceEvent{Kind: platform.AccessAction, ID: field.ID, Action: platform.AccessInsertText, Text: "Ada"})
+	if d.name != "Ada" {
+		t.Errorf("inserting over the selection: %q", d.name)
+	}
+	tt.send(platform.SurfaceEvent{Kind: platform.AccessAction, ID: field.ID, Action: platform.AccessInsertText, Text: " L."})
+	if f := accessNode(t, tt.h.access, platform.RoleTextField, ""); d.name != "Ada L." || f.SelStart != 6 || f.SelEnd != 6 {
+		t.Errorf("inserting at the caret: %q, %+v", d.name, f)
+	}
 }
 
 // byID returns the node of the tree with id.

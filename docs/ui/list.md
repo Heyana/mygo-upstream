@@ -125,6 +125,54 @@ The keys of items gone from the list stay in the selection until you take
 them out. `Element.ClickModifiers` gives the modifier keys of any click, for
 widgets of your own that do the same.
 
+In a list with `Selection`, a right-click on a row outside the choice
+chooses it before its context menu opens, as Finder and Qt do, so the menu
+acts on the row it was opened on; on a chosen row it leaves the choice as it
+is. `MenuKeepsSelection` turns this off: the menu opens on the row clicked,
+whose builder knows its row, and the choice stays. A list with `Selected`
+alone never chooses on a right-click.
+
+```go
+app.files.Selection = &app.chosen
+app.files.MenuKeepsSelection = true // the menu acts on the row clicked alone
+```
+
+`DragSelect`, with `Selection`, chooses rows as the pointer drags over them
+from the row it pressed, as a Shift-click on the row under the pointer
+would (with Cmd, or Ctrl on Linux and Windows, held as the press began,
+besides the rows chosen), scrolling the list as the pointer nears or passes
+its top or bottom. A press on a row not chosen chooses it as the pointer goes
+down, as a spreadsheet does, rather than at the release; a press on a row
+chosen waits for the release, so a drag of the choice keeps it.
+`DragSelecting` reports a drag choosing rows while the pointer holds it, for
+work that follows the choice, as a sum of the rows chosen, to wait until it
+ends. A list cannot both `DragSelect` and `Reorder`.
+
+`ExtendTo(row)` chooses the rows from the one Shift extends from to `row`,
+as a Shift-click on it does, for keys of your own, as one that extends the
+choice to the last row:
+
+```go
+if app.extendToEnd {
+	app.list.ExtendTo(len(app.files) - 1) // after the list is built
+}
+```
+
+What a row holds can tell which part of it a double click landed on without
+taking the click from the row, which goes on choosing: `RowDoubleClicked`
+reports a double click on the row with the pointer over the element.
+`DoubleClicked` on the element would take the click, and the row would not
+choose.
+
+```go
+ui.List(c, &app.list, len(app.files), func(i int) {
+	name := ui.Text(c, app.files[i].Name).Padding(6, 12)
+	if name.RowDoubleClicked() {
+		app.rename(i)
+	}
+})
+```
+
 ## Scrolling
 
 `ScrollTo(row, align)` shows a row at the `ui.Start`, `ui.Center` or

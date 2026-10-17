@@ -909,7 +909,9 @@ func (p *Painter) drawBitmap(img *Bitmap, box Rect, fit Fit, radius [4]float32, 
 	// Far smaller than its pixels, a level of it, as smooth.
 	shrink := min(frac.W*iw/(dst.W*p.scale), frac.H*ih/(dst.H*p.scale))
 	shown := img.smaller(shrink)
-	sw, sh := float32(shown.W), float32(shown.H)
+	// The bitmap in the pixels of the level shown: all of it, but for the
+	// part of a canvas an effect gets (Canvas.region).
+	sw, sh := iw*float32(shown.W)/float32(img.img.W), ih*float32(shown.H)/float32(img.img.H)
 	src := scene.Rect{X: frac.X * sw, Y: frac.Y * sh, W: frac.W * sw, H: frac.H * sh}
 	p.add(scene.Op{Kind: scene.OpImage, Rect: p.snap(dst), Radii: p.radii(radius), Continuous: continuousCorners, Image: shown, Src: src, Opacity: p.opacity, Grayscale: gray,
 		Pixelated: img.pixelated && shrink <= 1})
@@ -1183,7 +1185,10 @@ func (p *Painter) ImageRegion(b *Bitmap, src, dst Rect, o ImageOptions) {
 	// Far smaller than its pixels, a level of the bitmap, as smooth.
 	shrink := min(src.W/(dst.W*p.scale), src.H/(dst.H*p.scale))
 	shown := b.smaller(shrink)
-	kx, ky := float32(shown.W)/float32(b.w), float32(shown.H)/float32(b.h)
+	// Pixels of the bitmap to those of the level shown, whose size is its
+	// image's, larger than the bitmap for the part of a canvas an effect
+	// gets (Canvas.region).
+	kx, ky := float32(shown.W)/float32(b.img.W), float32(shown.H)/float32(b.img.H)
 	sr := scene.Rect{X: src.X * kx, Y: src.Y * ky, W: src.W * kx, H: src.H * ky}
 	if o.FlipX {
 		sr.X, sr.W = sr.X+sr.W, -sr.W

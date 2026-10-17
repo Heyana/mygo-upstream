@@ -647,11 +647,13 @@ func (s *devSession) updateI18n(c *Config) error {
 	return nil
 }
 
-// hashEntitlements writes the entitlements that sign the app and code among
-// its resources to w, to tell whether they changed.
+// hashEntitlements fingerprints the app's profile and the entitlements
+// that sign it and code among its resources.
 func hashEntitlements(w io.Writer, c *Config) error {
-	files := map[string]string{"": c.MacOS.Entitlements} // "": the app
-	maps.Copy(files, c.MacOS.HelperEntitlements)
+	files := map[string]string{"app": c.MacOS.Entitlements, "profile": c.MacOS.ProvisioningProfile}
+	for name, file := range c.MacOS.HelperEntitlements {
+		files["helper:"+name] = file
+	}
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		if files[name] == "" {
 			continue

@@ -1467,22 +1467,8 @@ func (r *Renderer) render(s *scene.Scene) error {
 	r.track(cb)
 	r.lastRender = time.Now()
 	r.armTrim()
-	// Forget the textures of images no frame drew for a while, and those
-	// of canvases gone.
 	if r.frame%120 == 0 {
-		for key, t := range r.images {
-			if r.frame-t.lastFrame > 240 {
-				release(&t.tex)
-				delete(r.images, key)
-			}
-		}
-		for key, t := range r.canvases {
-			if t.canvas.Value() == nil {
-				release(&t.tex)
-				t.drawState.release()
-				delete(r.canvases, key)
-			}
-		}
+		r.sweep()
 	}
 	return nil
 }
@@ -1677,4 +1663,23 @@ func (r *Renderer) FrameInfo() string {
 		info += fmt.Sprintf(", %d batches awaiting specialized pipelines", n)
 	}
 	return info
+}
+
+// sweep frees the textures of images no frame drew for a while, and
+// those of canvases gone, or transient and not drawn this frame: render
+// calls it every 120 frames.
+func (r *Renderer) sweep() {
+	for key, t := range r.images {
+		if r.frame-t.lastFrame > 240 {
+			release(&t.tex)
+			delete(r.images, key)
+		}
+	}
+	for key, t := range r.canvases {
+		if c := t.canvas.Value(); c == nil || c.Transient && t.lastFrame != r.frame {
+			release(&t.tex)
+			t.drawState.release()
+			delete(r.canvases, key)
+		}
+	}
 }

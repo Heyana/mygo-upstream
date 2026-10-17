@@ -234,6 +234,15 @@ type engine struct {
 	// pressClicks is the press's count of clicks, which its release
 	// carries.
 	pressClicks int
+	// listMenu and listDrag are the parts of lists a right-click and a
+	// drag reach, set as the first list builds, and cellClick and
+	// cellInBlock the parts of tables choosing cells a click and a press
+	// reach, set as the first of those builds, so apps without them do not
+	// link them.
+	listMenu    func(rt *engine, chain []uint64, x, y float32)
+	listDrag    func(rt *engine)
+	cellClick   func(f *listFrame, x, y float32, mods Modifiers)
+	cellInBlock func(f *listFrame, x, y float32) bool
 	// pressDragger is the element around the one pressed that drags a
 	// value, which takes the press as it moves (dragMove), or 0.
 	pressDragger uint64
@@ -476,6 +485,9 @@ func (rt *engine) runFrame() {
 		rt.dragScroll()
 	}
 	rt.scrollTextSelection()
+	if rt.listDrag != nil {
+		rt.listDrag(rt)
+	}
 
 	if rt.exitsBuilt {
 		// The last frame's elements stay as they are while this one builds,

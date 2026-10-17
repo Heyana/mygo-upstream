@@ -163,6 +163,10 @@ type MacOS struct {
 	SigningIdentity string `json:"signingIdentity"`
 	// Entitlements is a plist of entitlements to sign the app with.
 	Entitlements string `json:"entitlements"`
+	// ProvisioningProfile is embedded as Contents/embedded.provisionprofile
+	// before signing. It must authorize the app's identifier and entitlements
+	// and match its signing identity; ad-hoc signing cannot use a profile.
+	ProvisioningProfile string `json:"provisioningProfile"`
 	// HelperEntitlements gives code among the resources entitlements of its
 	// own, by its path there: executables, libraries and bundles, e.g.
 	//   "bin/server": "server.entitlements.plist"

@@ -53,12 +53,26 @@ func TestMetalMasked(t *testing.T) {
 // TestMetalEffect checks that Metal draws an effect's shader from its
 // content, as the CPU does.
 func TestMetalEffect(t *testing.T) {
-	sc := effectScene(MustCompile(effectSource))
-	pix, err := metal.RenderOffscreen(sc)
-	if err != nil {
-		t.Skip("no Metal:", err)
+	for name, sc := range effectScenes(MustCompile(effectSource)) {
+		pix, err := metal.RenderOffscreen(sc)
+		if err != nil {
+			t.Skip("no Metal:", err)
+		}
+		gputest.Compare(t, "ui-shader-metal-effect-"+name, pix, sc.Width*4, sc)
 	}
-	gputest.Compare(t, "ui-shader-metal-effect", pix, sc.Width*4, sc)
+}
+
+// TestMetalBackdropEndsAtDrawn checks that Metal ends a backdrop at the
+// edge of what a frame draws (Scene.Drawn), as the CPU does.
+func TestMetalBackdropEndsAtDrawn(t *testing.T) {
+	for name, scs := range edgeBackdrops() {
+		sc := scs[1]
+		pix, err := metal.RenderOffscreen(sc)
+		if err != nil {
+			t.Skip("no Metal:", err)
+		}
+		gputest.Compare(t, "ui-shader-metal-backdrop-drawn-"+name, pix, sc.Width*4, sc)
+	}
 }
 
 // TestMetalBackdrop checks that Metal gives a shader its backdrop, as the

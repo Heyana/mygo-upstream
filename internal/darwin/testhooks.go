@@ -746,14 +746,15 @@ func TestAccessibilityPerform(handle uintptr, label, action, value string) bool 
 		ok := false
 		withPool(func() {
 			selector := map[string]string{"press": "accessibilityPerformPress", "increment": "accessibilityPerformIncrement",
-				"decrement": "accessibilityPerformDecrement", "focus": "setAccessibilityFocused:", "value": "setAccessibilityValue:"}[action]
+				"decrement": "accessibilityPerformDecrement", "focus": "setAccessibilityFocused:", "value": "setAccessibilityValue:",
+				"insert": "setAccessibilitySelectedText:"}[action]
 			if !sendBool(n.obj, "isAccessibilitySelectorAllowed:", uintptr(sel(selector))) {
 				return
 			}
 			switch action {
 			case "focus":
 				send(n.obj, selector, 1)
-			case "value":
+			case "value", "insert":
 				send(n.obj, selector, uintptr(nsString(value)))
 			default:
 				sendBool(n.obj, selector)

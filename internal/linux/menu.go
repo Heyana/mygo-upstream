@@ -473,6 +473,10 @@ func (t *tray) SetImage(png []byte, template bool) error {
 	return nil
 }
 
+// SetID does nothing: the indicator's ID is given as it is made, and
+// panels place indicators themselves.
+func (t *tray) SetID(string) {}
+
 func (t *tray) SetTitle(title string) { appIndicatorSetLabel(t.ind, cs(title), cs(title)) }
 
 func (t *tray) SetToolTip(tip string) {

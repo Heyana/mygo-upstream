@@ -3,6 +3,7 @@
 package mygo
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/internal/fake"
@@ -171,4 +172,20 @@ func TestTrayFlyout(t *testing.T) {
 		parent, _ := testWindow(t, WindowOptions{})
 		NewFlyout(FlyoutOptions{Parent: parent, Tray: tray})
 	}()
+}
+
+// TestTrayID names the icons that have an ID, so that macOS keeps where
+// the user put each of an app's icons.
+func TestTrayID(t *testing.T) {
+	before := len(fb.TrayIDs())
+	for _, id := range []string{"cpu", "", "memory"} {
+		tray, err := NewTray(TrayOptions{ID: id})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tray.Destroy()
+	}
+	if got := fb.TrayIDs()[before:]; !slices.Equal(got, []string{"cpu", "memory"}) {
+		t.Errorf("the icons were named %q", got)
+	}
 }

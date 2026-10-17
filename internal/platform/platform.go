@@ -980,6 +980,8 @@ type TrayHandler interface {
 
 // Tray is a status bar / notification area icon.
 type Tray interface {
+	// SetID names the icon across launches (macOS's autosave name).
+	SetID(id string)
 	SetImage(png []byte, template bool) error
 	SetTitle(title string)
 	SetToolTip(tip string)
@@ -1003,4 +1005,11 @@ type Notification struct {
 	DelaySeconds float64
 	Badge        *int
 	Data         map[string]string
+	Sender       *NotificationSender
+}
+
+// NotificationSender describes an incoming direct message's sender.
+type NotificationSender struct {
+	ID, Name string
+	Avatar   []byte
 }

@@ -318,6 +318,12 @@ func (b *Backend) NewTray(h platform.TrayHandler) (platform.Tray, error) {
 	return t, nil
 }
 
+// SetID gives the status item an autosave name: macOS keeps under it where
+// the user dragged the item with ⌘, and puts it there as it is made again.
+func (t *tray) SetID(id string) {
+	withPool(func() { send(t.item, "setAutosaveName:", uintptr(nsString(id))) })
+}
+
 func (t *tray) SetImage(png []byte, template bool) error {
 	var err error
 	withPool(func() {

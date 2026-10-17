@@ -100,7 +100,7 @@ type EffectBackdrop struct {
 func (p *Painter) EffectBackdrop(r Rect, blur float32, inset Point) EffectBackdrop {
 	rect := p.snap(r)
 	m := p.transform.Pixels(p.scale)
-	bk := scene.BackdropOf(m.Bounds(rect), blur, p.s.Width, p.s.Height)
+	bk := p.s.BackdropOf(m.Bounds(rect), blur, p.s.Width, p.s.Height)
 	w, h := bk.Size()
 	s := p.scale
 	// Corner, then the op's local pixels, then the frame's.

@@ -266,6 +266,12 @@ export interface MacOSConfig {
   /** A property list of entitlements to sign the app with. */
   entitlements?: string;
   /**
+   * A provisioning profile embedded before signing, for restricted entitlements.
+   * Must match the app's identifier, entitlements and signing identity.
+   * Cannot be used with ad-hoc signing. Paths are relative to the project.
+   */
+  provisioningProfile?: string;
+  /**
    * Property lists of entitlements for code among the resources, by its path
    * there, e.g. `{ "bin/server": "server.entitlements.plist" }` for a helper
    * that needs `com.apple.security.cs.allow-jit` under the hardened runtime.

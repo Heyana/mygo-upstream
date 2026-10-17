@@ -110,6 +110,49 @@ mygo.NewNotification(mygo.NotificationOptions{
 }).Show()
 ```
 
+### Sender avatars on macOS
+
+An incoming direct message can supply a sender to display a prominent
+avatar with the app's small icon on macOS 12 and later:
+
+```go
+mygo.NewNotification(mygo.NotificationOptions{
+	ID: "message:7", Group: "conversation:3",
+	Title: "Ada", Subtitle: "Lunch", Body: "See you at noon",
+	Sender: &mygo.NotificationSender{
+		ID: "user:ada", Name: "Ada", Avatar: avatarPNG,
+	},
+}).Show()
+```
+
+`Sender.ID` identifies the person in the app; it is not inferred to be an
+email address or phone number. `Name` defaults to `Title`. `Avatar` holds
+encoded image bytes, such as PNG or JPEG; the app fetches them and decides
+whether the message's sender and content may be shared with the system.
+`NewNotification` copies the sender and image, so the app can reuse its
+buffers. `Group` is the conversation identifier; without one, it uses the
+notification's ID. This API represents a direct incoming message, not a
+group chat or outgoing message. macOS controls the communication layout;
+the subtitle is included above the message in the body.
+
+Enable **Communication Notifications** for the app's Apple App ID and add
+`INSendMessageIntent` to `macos.infoPlist.NSUserActivityTypes`. Sign with
+`com.apple.developer.usernotifications.communication` and embed a matching
+provisioning profile, including for Developer ID distribution: set
+`macos.provisioningProfile`, which `mygo build` copies to
+`Contents/embedded.provisionprofile` before signing (see
+[Provisioning profiles](distribution.md#provisioning-profiles)). The
+profile must authorize the app's identifier, certificate and entitlements.
+Do not add the restricted entitlement to an ad-hoc build: macOS can refuse
+to launch it.
+
+MyGo checks the signed entitlement before donating the incoming message to
+SiriKit and updating its notification content. Without the capability, with
+an incomplete sender or invalid avatar, or when donation/content conversion
+fails, it sends the ordinary notification. Windows, Linux and unsupported
+platforms retain their existing behavior. IDs, sound, grouping, click
+handlers, `Close` and `ClearNotifications` use the same notification lifecycle.
+
 ## Clipboard
 
 ```go

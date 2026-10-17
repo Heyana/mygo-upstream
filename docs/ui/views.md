@@ -157,9 +157,13 @@ ui.Checkbox(c.Key(todo.ID), &todo.Done, todo.Title)
 ui.TextInput(c.Key("search"), &app.query)
 ```
 
-Keys are unique among siblings. `Element.Key` can key a container before
-its children or local state are built. Use `Context.Key` for stateful
-controls and custom base widgets.
+Keys are unique among siblings, and compare as Go compares a map's keys: a
+pointer keys the object it points to, whatever the object holds, so an
+item's pointer serves as its key as well as an ID does. A key Go cannot
+compare, as a slice, or not equal to itself, as a NaN, compares by its
+value printed. `Element.Key` can
+key a container before its children or local state are built. Use
+`Context.Key` for stateful controls and custom base widgets.
 
 ## Change the state from other goroutines
 

@@ -81,6 +81,15 @@ func (w *window) showPopover() {
 	msgSetSize(w.popover, sel("setContentSize:"), NSSize{float64(w.flyoutSize.Width), float64(w.flyoutSize.Height)})
 	msgRectIDUint(w.popover, sel("showRelativeToRect:ofView:preferredEdge:"), r, view, edge)
 	w.adoptPopoverWindow()
+	w.highlightTray(true)
+}
+
+// highlightTray highlights the tray icon a popover shows from while it
+// shows, as AppKit's status items are while their menus show.
+func (w *window) highlightTray(on bool) {
+	if t, ok := w.flyout.Tray.(*tray); ok && t.item != 0 {
+		send(t.button, "highlight:", boolArg(on))
+	}
 }
 
 // adoptPopoverWindow makes the window the popover shows in the flyout's.
@@ -142,6 +151,7 @@ func (w *window) cleanupPopover() {
 	w.forgetPopoverWindow()
 	send(w.popover, "setDelegate:", 0)
 	if sendBool(w.popover, "isShown") {
+		w.highlightTray(false)
 		send(w.popover, "setAnimates:", 0)
 		send(w.popover, "close")
 	}
@@ -171,6 +181,7 @@ func popoverDelegateMethods() []objc.MethodDef {
 			if w == nil {
 				return
 			}
+			w.highlightTray(false)
 			w.forgetPopoverWindow()
 			if w.popoverClosing {
 				w.popoverClosing = false

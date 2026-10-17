@@ -56,12 +56,13 @@ func TestDirect3DMasked(t *testing.T) {
 // TestDirect3DEffect checks that Direct3D draws an effect's shader from
 // its content, as the CPU does.
 func TestDirect3DEffect(t *testing.T) {
-	sc := effectScene(MustCompile(effectSource))
-	pix, stride, err := d3d11.RenderOffscreen(sc)
-	if err != nil {
-		t.Skip("no Direct3D:", err)
+	for name, sc := range effectScenes(MustCompile(effectSource)) {
+		pix, stride, err := d3d11.RenderOffscreen(sc)
+		if err != nil {
+			t.Skip("no Direct3D:", err)
+		}
+		gputest.Compare(t, "ui-shader-d3d11-effect-"+name, pix, stride, sc)
 	}
-	gputest.Compare(t, "ui-shader-d3d11-effect", pix, stride, sc)
 }
 
 // TestDirect3DBackdrop checks that Direct3D gives a shader its backdrop,

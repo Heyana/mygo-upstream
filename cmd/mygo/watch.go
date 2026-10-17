@@ -61,6 +61,9 @@ func listBuildInputs(c *Config) (*buildInputs, error) {
 	if c.MacOS.Entitlements != "" {
 		in.files = append(in.files, c.path(c.MacOS.Entitlements))
 	}
+	if c.MacOS.ProvisioningProfile != "" {
+		in.files = append(in.files, c.path(c.MacOS.ProvisioningProfile))
+	}
 	for _, f := range c.MacOS.HelperEntitlements {
 		in.files = append(in.files, c.path(f))
 	}

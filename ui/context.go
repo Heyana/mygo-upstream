@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"hash/maphash"
+	"reflect"
 	"time"
 
 	"github.com/egoist/mygo/internal/scene"
@@ -280,16 +281,38 @@ func keyedID(parent uint64, k any) uint64 {
 	switch k := k.(type) {
 	case string:
 		h = maphash.String(keySeed, k)
+	// Integers of different types are different keys, as in a map.
 	case int:
 		h = uint64(k)*0x9E3779B97F4A7C15 + 1
 	case int64:
-		h = uint64(k)*0x9E3779B97F4A7C15 + 1
+		h = uint64(k)*0x9E3779B97F4A7C15 + 2
 	case uint64:
-		h = k*0x9E3779B97F4A7C15 + 1
+		h = k*0x9E3779B97F4A7C15 + 3
 	default:
-		h = maphash.String(keySeed, fmt.Sprintf("%T:%v", k, k))
+		h = keyHash(k)
 	}
 	return mix(parent, h^0xA5A5A5A5A5A5A5A5)
+}
+
+// keyHash hashes a key as Go compares it, as a map's key: a pointer by the
+// object it points to, whatever the object holds, a struct or an array by
+// its fields or elements, and keys of different types apart. A key Go
+// cannot compare, such as a slice, is hashed by its value printed, and so
+// is a key not equal to itself, as a NaN, which a map would hash anew
+// each time.
+func keyHash(k any) (h uint64) {
+	printed := func() uint64 { return maphash.String(keySeed, fmt.Sprintf("%T:%v", k, k)) }
+	defer func() {
+		if recover() != nil {
+			h = printed()
+		}
+	}()
+	if k != k { // panics for a key Go cannot compare
+		return printed()
+	}
+	// One instance of Comparable for both: another, for reflect.Type,
+	// would grow every native app by 16 KB.
+	return maphash.Comparable[any](keySeed, k) ^ maphash.Comparable[any](keySeed, reflect.TypeOf(k))*0x9E3779B97F4A7C15
 }
 
 // mix combines two hashes (the finalizer of splitmix64).
@@ -468,7 +491,13 @@ type state struct {
 	gestures       []GestureEvent
 	rt             *engine
 	pendingSubmit  bool
+	pendingChange  bool
 	noticeQueued   bool
+
+	// rowPressed marks a row of a list the pointer pressed, until the
+	// release; pressChose, that the press chose it, so that its click does
+	// not choose again.
+	rowPressed, pressChose bool
 
 	world scene.Affine
 	clips bool

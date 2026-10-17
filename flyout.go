@@ -114,7 +114,8 @@ type FlyoutOptions struct {
 	// the keyboard while it shows, Focusable or not, which makes it close
 	// as the user clicks elsewhere. Its content draws no background there
 	// (ui.Context.Vibrancy reports the material): elsewhere, where Popover
-	// changes nothing, it draws its own.
+	// changes nothing, it draws its own. A Tray's icon is highlighted while
+	// its popover shows, as a status item is while its menu does.
 	Popover bool
 
 	// URL is loaded right after the flyout is created, as

@@ -117,6 +117,10 @@ func (t *tray) SetImage(data []byte, template bool) error {
 
 func (t *tray) SetTitle(string) {}
 
+// SetID does nothing: the notification area keeps where icons go by the
+// executable's path.
+func (t *tray) SetID(string) {}
+
 func (t *tray) SetToolTip(tip string) {
 	t.tip = tip
 	t.update()

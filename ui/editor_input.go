@@ -263,7 +263,7 @@ func (w *widgetTextInput) layout() *text.Layout {
 		params.Text = ed.displayText()
 		params.Spans = ""
 		if !ed.password {
-			params.Spans, _ = ed.rangeSpans(0, ed.buf.n)
+			params.Spans = ed.rangeKey(0, ed.buf.n)
 		}
 		ed.shapeInput(params)
 	}

@@ -2746,11 +2746,27 @@ func TestContentWindowObserved(t *testing.T) {
 		mygo.RunOnMain(func() { s = name })
 		return s == "Grace"
 	})
+	// Text typed through accessibility goes in over the selection, at
+	// the caret after the value set.
+	if !accessPerform(w, "Name", "insert", " Hopper") {
+		t.Fatal("cannot insert text into the text field")
+	}
+	eventually(t, "the text inserted", func() bool {
+		var s string
+		mygo.RunOnMain(func() { s = name })
+		return s == "Grace Hopper"
+	})
+	if accessPerform(w, "Notes", "insert", "x") {
+		t.Error("text could be inserted into the read-only text field")
+	}
 	// AppKit answers for what the element does not.
 	if accessPerform(w, "Settings", "press", "") {
 		t.Error("a text could be pressed")
 	}
 	// The overrides of the older API answer too.
+	if _, settable, _, ok := axAttribute(w, "Name", "AXSelectedText"); ok && !settable {
+		t.Error("the text field's selected text is not settable")
+	}
 	if _, settable, _, ok := axAttribute(w, "Name", "AXValue"); ok && !settable {
 		t.Error("the text field's value is not settable")
 	}

@@ -3108,7 +3108,17 @@ either.
   element's subtree into a canvas kept in its state, at the window's
   scale, in the element's own space (`paintEffect`: positions shift, and
   transforms in the subtree lose the element's own, `unworld`), then
-  paints the effect with the element's transform. `ui/shader` gives an
+  paints the effect with the element's transform. The canvas is made in
+  steps of 64 pixels (`effectLayerStep`), the content in its top left
+  corner, and kept while the content fits and leaves less than two steps
+  over, resized in place otherwise (`Image.Resize`): an element whose
+  edges cross pixels as it moves, or whose text grows, keeps one canvas
+  and one texture, rather than one a size. The effect gets the content's
+  part (`Canvas.region`), so shaders read beyond it as transparent, as
+  beyond a canvas of its size; what the subtree paints is clipped to that
+  part, and backdrops end at its edge (`Scene.Drawn`, `Scene.BackdropOf`,
+  which the painter, the builders and the CPU renderer use alike), as at a
+  canvas's. The canvas is transient (`Image.Transient`). `ui/shader` gives an
   effect's entry point (`ColorEffect`, `DistortionEffect`, `LayerEffect`)
   a `Fragment` that calls it, and the bridge reads the content as image 3
   (`LayerImage`) from where the box's corner lies in it
@@ -3351,7 +3361,11 @@ either.
   framebuffer object, whose rows go up, so that image instances showing
   it flip their texture coordinates (the samplers take source rectangles
   either way round). A canvas's texture lives as long as the canvas
-  (`weak.Pointer`), not drawn again when shown. The CPU renderer draws
+  (`weak.Pointer`), not drawn again when shown; a transient canvas's,
+  drawn anew in every frame that shows it, as an effect's, only while
+  frames draw it: the renderers' sweep every 120 frames frees it, rather
+  than wait for the canvas to be collected, which the little of Go's heap
+  it takes may put off for minutes while its texture takes megabytes. The CPU renderer draws
   canvases into their `Pix` (`PixVersion`).
   Near square corners, coverage is exact, the area of a pixel
   inside the box, so lines thinner than a pixel cover as much as they
@@ -4146,7 +4160,7 @@ which npm allows only for packages that exist: the first release uses an
 | auto-hide menu bar | ignored | the bar widget hides; `can-activate-accel` keeps its shortcuts; Alt alone or F10 show it and open its first menu until it deactivates | the menu is attached only for the `SC_KEYMENU` menu loop that Alt alone or F10 start; shortcuts come from the webview |
 | tray | NSStatusItem, click events | AppIndicator (menu only, no click events) | notification area icon, click events |
 | global shortcuts | Carbon hot keys | X11: `XGrabKey` on the root window (with Caps/Num Lock variants), key presses from a GDK filter. Wayland: the XDG `GlobalShortcuts` portal (see [Linux](#linux-internallinux)) | `RegisterHotKey` |
-| notifications | UserNotifications, packaged apps only; `Group` is the `threadIdentifier`; the delegate is attached at launch, for the click that launched the app | org.freedesktop.Notifications over D-Bus; no `Group` | notification-area balloons (toasts); no `Group` |
+| notifications | UserNotifications, packaged apps only; `Group` is the `threadIdentifier`; optional `Sender` uses communication notifications with the signed capability; the delegate is attached at launch, for the click that launched the app | org.freedesktop.Notifications over D-Bus; ignores `Group` and `Sender` | notification-area balloons (toasts); ignores `Group` and `Sender` |
 | notification removal | `removeDeliveredNotificationsWithIdentifiers:`; `ClearNotifications` removes all, earlier runs' too | `CloseNotification` on the bus, for those of this run | hides the balloon, which goes away by itself anyway |
 | WebViewAvailable (any goroutine, before `Run` too) | `WKWebView` is there, which macOS always has | WebKitGTK 4.1 (or 4.0), JavaScriptCore and libsoup load, as `webKit` loads them for a window showing a page | `internal/webview2` finds a runtime, or a `WebView2Loader.dll` next to the executable exports what `createEnvironment` calls; once an environment was made, whether that worked. A runtime whose files are there but whose browser is not passes, and fails later, making the web view |
 | secrets | Security.framework generic passwords in the login keychain (`SecItem*`), service and account as keytar | libsecret's `org.freedesktop.Secret.Generic` schema (attributes `service`, `account`), loaded on first use, libsecret 0.19 or later; no libsecret, no session bus (`g_bus_get_sync`) or no Secret Service on it (`G_DBUS_ERROR_SERVICE_UNKNOWN`, `NAME_HAS_NO_OWNER`, `NO_SERVER`) is `ErrUnsupported` | Credential Manager generic credentials (`CredWriteW`), target `service/account` |

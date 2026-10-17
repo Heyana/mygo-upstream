@@ -81,6 +81,11 @@ type editor struct {
 	ranges []TextRange
 	apart  bool
 	merge  rangeMerge
+	// paintStyles, paintSpans and painted hold what rangeSpans returns to
+	// paint a text, used again for the next: painting keeps none.
+	paintStyles []text.Span
+	paintSpans  []Span
+	painted     spanPaint
 	// layout is what the last frame laid out of a single-line input or a
 	// selectable text; area lays out a text area (textarea.go).
 	layout           *text.Layout

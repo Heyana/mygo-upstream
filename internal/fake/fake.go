@@ -63,6 +63,7 @@ type Backend struct {
 
 	mu               sync.Mutex
 	windows          []*Window
+	trayIDs          []string
 	appMenu          *platform.Menu
 	popups           []Popup
 	updates          []*platform.MenuItem
@@ -371,7 +372,14 @@ func (b *Backend) Applications() ([]platform.Application, error) {
 	return append([]platform.Application(nil), Apps...), nil
 }
 
-func (b *Backend) NewTray(platform.TrayHandler) (platform.Tray, error) { return &tray{}, nil }
+func (b *Backend) NewTray(platform.TrayHandler) (platform.Tray, error) { return &tray{b: b}, nil }
+
+// TrayIDs returns the IDs the tray icons were given, in order.
+func (b *Backend) TrayIDs() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.trayIDs...)
+}
 
 func (b *Backend) RegisterHotkey(id int, acc string) error {
 	b.mu.Lock()
@@ -1139,8 +1147,13 @@ func (b *Backend) PreferenceReads() int {
 	return b.prefsReads
 }
 
-type tray struct{}
+type tray struct{ b *Backend }
 
+func (t *tray) SetID(id string) {
+	t.b.mu.Lock()
+	t.b.trayIDs = append(t.b.trayIDs, id)
+	t.b.mu.Unlock()
+}
 func (*tray) SetImage([]byte, bool) error { return nil }
 func (*tray) SetTitle(string)             {}
 func (*tray) SetToolTip(string)           {}

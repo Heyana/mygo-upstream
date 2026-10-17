@@ -788,6 +788,7 @@ func (r *Renderer) drawCanvas(c *scene.Image) error {
 		t = &canvasTexture{canvas: weak.Make(c)}
 		r.canvases[c.ID()] = t
 	}
+	t.lastFrame = r.frame // drawn or shown: the sweep keeps a transient canvas's texture
 	if t.tex != 0 && t.w == c.W && t.h == c.H && t.ver == c.Version() {
 		return nil
 	}
@@ -795,6 +796,7 @@ func (r *Renderer) drawCanvas(c *scene.Image) error {
 		if err := r.newTarget(&t.texture, c.W, c.H, true); err != nil {
 			return err
 		}
+		t.lastFrame = r.frame // newTarget clears the texture's state
 	}
 	cs := c.Scene
 	cs.Width, cs.Height = c.W, c.H
@@ -1171,25 +1173,30 @@ func (r *Renderer) present(sync uintptr) error {
 	if failed(hr) {
 		return fmt.Errorf("d3d11: present failed: %#x", uint32(hr))
 	}
-	// Forget the textures of images no frame drew for a while, and those
-	// of canvases gone.
 	if r.frame%120 == 0 {
-		for id, t := range r.images {
-			if r.frame-t.lastFrame > 240 {
-				free(&t.srv)
-				free(&t.tex)
-				delete(r.images, id)
-			}
-		}
-		for id, t := range r.canvases {
-			if t.canvas.Value() == nil {
-				freeCanvas(t)
-				delete(r.canvases, id)
-			}
-		}
+		r.sweep()
 	}
 	return nil
 }
 
 // FrameInfo describes the last frame for MYGO_FRAME_STATS.
 func (r *Renderer) FrameInfo() string { return r.b.Summary() }
+
+// sweep frees the textures of images no frame drew for a while, and
+// those of canvases gone, or transient and not drawn this frame: render
+// calls it every 120 frames.
+func (r *Renderer) sweep() {
+	for id, t := range r.images {
+		if r.frame-t.lastFrame > 240 {
+			free(&t.srv)
+			free(&t.tex)
+			delete(r.images, id)
+		}
+	}
+	for id, t := range r.canvases {
+		if c := t.canvas.Value(); c == nil || c.Transient && t.lastFrame != r.frame {
+			freeCanvas(t)
+			delete(r.canvases, id)
+		}
+	}
+}

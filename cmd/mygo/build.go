@@ -116,6 +116,10 @@ WebAssembly, named by its content: a static site, to serve from anywhere.`)
 	if c.MacOS.Notarize != nil && !opts.skipNotarize && opts.sign == "-" {
 		return fmt.Errorf("notarization needs a Developer ID signing identity: set macos.signingIdentity or pass -sign")
 	}
+	if c.MacOS.ProvisioningProfile != "" && opts.sign == "-" && slices.ContainsFunc(splitList(*platforms), func(p string) bool { return strings.HasPrefix(p, "darwin/") }) {
+		// Before building anything, as codesign would.
+		return errProfileAdHoc
+	}
 
 	con.startBanner("build")
 	started := time.Now()

@@ -38,8 +38,9 @@ type Backend struct {
 	notifyDelegate id
 	// notifyAnswered records that the user has answered whether the app
 	// may show notifications; notifyWaiting holds those shown meanwhile.
-	notifyAnswered bool
-	notifyWaiting  []waitingNotification
+	notifyAnswered  bool
+	notifyWaiting   []waitingNotification
+	notifyPreparing map[string]func()
 
 	stepping       int
 	quitAfterModal bool

@@ -554,6 +554,12 @@ func (rt *engine) accessAction(ev platform.SurfaceEvent) {
 		}
 		rt.focusOn(s)
 		s.editor.queue = append(s.editor.queue, editEvent{kind: editCommand, text: "selectAll"}, editEvent{kind: editInsert, text: ev.Text})
+	case platform.AccessInsertText:
+		if s.editor == nil || s.flags&flagEditable == 0 || s.editor.readOnly {
+			return
+		}
+		rt.focusOn(s)
+		s.editor.queue = append(s.editor.queue, editEvent{kind: editInsert, text: ev.Text})
 	}
 	rt.requestFrame()
 }

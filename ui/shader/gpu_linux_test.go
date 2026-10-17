@@ -99,17 +99,18 @@ func TestOpenGLEffect(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	for _, es := range []bool{false, true} {
-		sc := effectScene(MustCompile(effectSource))
-		o, err := gl.NewOffscreen(es, sc.Width, sc.Height)
-		if err != nil {
-			t.Skip(err)
+		for name, sc := range effectScenes(MustCompile(effectSource)) {
+			o, err := gl.NewOffscreen(es, sc.Width, sc.Height)
+			if err != nil {
+				t.Skip(err)
+			}
+			pix, err := o.Render(sc)
+			o.Release()
+			if err != nil {
+				t.Fatal(err)
+			}
+			gputest.Compare(t, "ui-shader-gl-effect-"+name, pix, sc.Width*4, sc)
 		}
-		pix, err := o.Render(sc)
-		o.Release()
-		if err != nil {
-			t.Fatal(err)
-		}
-		gputest.Compare(t, "ui-shader-gl-effect", pix, sc.Width*4, sc)
 	}
 }
 

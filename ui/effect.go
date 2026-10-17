@@ -47,6 +47,20 @@ func (e *node) Effect(fx Effect) *node { e.effect = fx; return e }
 // which every GPU renderer's textures allow.
 const maxEffectLayer = 8192
 
+// effectLayerStep is the multiple of pixels an effect's bitmap is made
+// in, as Chromium makes the textures of its render passes: one made a
+// little larger than the content holds it as the element's edges cross
+// pixels on the way of an animation, or as its text grows, rather than a
+// texture made for each size. A bitmap two steps larger than the content
+// is made smaller again.
+const effectLayerStep = 64
+
+// layerSide is the side of an effect's bitmap holding n pixels: n rounded
+// up to a step.
+func layerSide(n int) int {
+	return min((n+effectLayerStep-1)/effectLayerStep*effectLayerStep, maxEffectLayer)
+}
+
 // paintEffect paints e through its effect, or blurred (Blur), and reports
 // whether it did: e's subtree rendered into its state's canvas, then the
 // effect over its box, or the canvas blurred. It paints nothing of e
@@ -77,13 +91,17 @@ func (p *Painter) paintEffect(e *node) bool {
 		return false // too large to render apart: as it is
 	}
 	cv := e.st.effectLayer
-	if cv == nil || cv.img.W != w || cv.img.H != h {
-		cv = NewCanvas(w, h)
+	switch {
+	case cv == nil:
+		cv = NewCanvas(layerSide(w), layerSide(h))
+		cv.img.Transient = true
 		e.st.effectLayer = cv
+	case cv.img.W < w || cv.img.H < h || cv.img.W-w >= 2*effectLayerStep || cv.img.H-h >= 2*effectLayerStep:
+		cv.resize(layerSide(w), layerSide(h))
 	}
 	dx, dy := -x0/s, -y0/s
 	world := e.world
-	cv.draw(p, s, func(cp *Painter) {
+	cv.drawPart(p, s, w, h, func(cp *Painter) {
 		e.effecting = true
 		// The subtree in e's own space, moved to the bitmap's corner:
 		// positions shift, and the transforms of those transformed lose
@@ -100,7 +118,9 @@ func (p *Painter) paintEffect(e *node) bool {
 		e.effecting = false
 	})
 	if e.effect != nil {
-		e.effect.PaintEffect(p, box, cv.Bitmap(), Point{box.X*s - x0, box.Y*s - y0})
+		// The content is the bitmap's top left w×h pixels: the effect
+		// draws over those, and reads it transparent beyond.
+		e.effect.PaintEffect(p, box, cv.region(w, h), Point{box.X*s - x0, box.Y*s - y0})
 		return true
 	}
 	// The canvas blurred, in its pixels, where it was drawn from.

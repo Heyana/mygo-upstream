@@ -37,6 +37,59 @@ Chosen and hovered rows are square from edge to edge, as in Finder's list
 view; `RoundRows` rounds their corners at the theme's `Radius`, as a list's
 rows are, for an app whose other lists are rounded.
 
+## Choosing cells
+
+With `Selection`, `CellSelect` makes the table choose a block of cells, as a
+spreadsheet does: the rows chosen, times the columns from `Cells.Anchor` to
+`Cells.Cursor` in the order shown (`Cells.All` for every column). It is one
+block: separate ranges of cells, as Excel's Cmd-drag adds, are not chosen.
+
+- **Clicks.** A click on a cell chooses its row and its column; a
+  Shift-click extends the rows and the columns to it; a Cmd-click (Ctrl-click
+  on Linux and Windows) adds its row or takes it out and keeps the columns.
+  A press on a cell outside the block chooses as the pointer goes down; a
+  press inside the block waits for the release.
+- **Dragging** over cells chooses those it goes over, and scrolls the table
+  near its edges, down and sideways.
+- **Keys.** Left and Right move `Cells.Cursor`, Shift with them extends the
+  columns; the keys that move the rows leave one column unless with Shift;
+  Cmd+A chooses every row and every column. Right to left, Left goes to the
+  column on the left of the screen. In an `OutlineTable`, Left and Right
+  still open and close the rows, and the columns are chosen with the pointer.
+- **Right-click.** On a cell outside the block, it chooses that cell before
+  the context menu opens; inside, the block stays. `MenuKeepsSelection`
+  leaves the block as it is.
+- **Row headers.** A `RowHeader` column, as a spreadsheet's row numbers,
+  chooses whole rows: a click or a drag on its cells chooses rows with every
+  column, and a click on its header every row. It does not sort.
+
+The cells of the block show as a chosen row does, in the accent color with
+the accent's text color, as do the row headers of whole rows chosen, and the
+cell at `Cells.Cursor` in the row the keys move from has a border while the
+table has the focus. A cell holding the focus, as an editor in it, shows as
+it is. Chosen rows are not tinted whole. `SelectedColumns` returns the
+block's column IDs in the order shown, and `SelectColumns` chooses every row
+and a range of columns, for the app's own commands. `CellSelected(row, col)`
+tells a cell builder whether its cell is chosen, for text of its own color
+to show on the accent. A cell that reads its
+row's double click with `RowDoubleClicked` leaves the click to the row, so
+the block follows it.
+
+```go
+cols := []ui.TableColumn{{Title: "#", RowHeader: true, Width: 48, Fixed: true}, {Title: "Name"}, {Title: "Size", Width: 90}}
+app.grid.Selection, app.grid.CellSelect = &app.chosen, true
+ui.Table(c, &app.grid, cols, len(rows), func(row, col int) {
+	text, color := rows[row][col], c.Theme().Text
+	if text == "" {
+		text, color = "empty", c.Theme().TextMuted
+	}
+	if app.grid.CellSelected(row, col) {
+		color = c.Theme().AccentText // muted does not show on the accent
+	}
+	ui.Text(c, text).TextColor(color).SingleLine()
+}).Grow(1)
+```
+
 ## Arranging columns
 
 The user arranges the columns, as in Finder:
@@ -104,6 +157,22 @@ app.files.HeaderMenu = func(m *ui.Menu, col int) {
 }
 ```
 
+## Cell menu
+
+`ListState.CellMenu` gives the cells a context menu over the whole cell,
+padding included, built as [ContextMenu](context-menu.md)'s is. `row` and
+`col` are as the cell builder receives them. A menu built without items does
+not open, and a context menu of what a cell holds takes the right-click over
+it instead:
+
+```go
+app.grid.CellMenu = func(m *ui.Menu, row, col int) {
+	if m.Item("Copy").Chosen() {
+		app.copy(row, col)
+	}
+}
+```
+
 ## Renaming in place
 
 An [editable text](editable-text.md) in a cell is renamed in place, as
@@ -122,6 +191,7 @@ ui.Table(c, &app.files, cols, len(files), func(row, col int) {
 
 Assistive technology sees a table, named by its `Label`, of rows named by
 the text inside them, each saying which of all the rows it is, with column
-headers that say the order the rows are sorted in.
+headers that say the order the rows are sorted in. With `CellSelect`, the
+cells of the block say they are chosen.
 
 For a tree of rows in columns, see [Outline](outline.md#in-columns).

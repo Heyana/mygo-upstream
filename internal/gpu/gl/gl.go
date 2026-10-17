@@ -560,18 +560,7 @@ func (r *Renderer) draw(s *scene.Scene) error {
 		return err
 	}
 	if r.frame%120 == 0 {
-		for key, t := range r.images {
-			if r.frame-t.lastFrame > 240 {
-				glDeleteTextures(1, &t.tex)
-				delete(r.images, key)
-			}
-		}
-		for key, t := range r.canvases {
-			if t.canvas.Value() == nil {
-				r.deleteCanvas(t)
-				delete(r.canvases, key)
-			}
-		}
+		r.sweep()
 	}
 	return nil
 }
@@ -603,6 +592,7 @@ func (r *Renderer) drawCanvas(c *scene.Image) error {
 		t = &canvasTexture{canvas: weak.Make(c)}
 		r.canvases[c.ID()] = t
 	}
+	t.lastFrame = r.frame // drawn or shown: the sweep keeps a transient canvas's texture
 	if t.tex != 0 && t.w == c.W && t.h == c.H && t.ver == c.Version() {
 		return nil
 	}
@@ -1123,3 +1113,21 @@ func (r *Renderer) Release() {
 
 // FrameInfo describes the last frame for MYGO_FRAME_STATS.
 func (r *Renderer) FrameInfo() string { return r.b.Summary() }
+
+// sweep frees the textures of images no frame drew for a while, and
+// those of canvases gone, or transient and not drawn this frame: render
+// calls it every 120 frames.
+func (r *Renderer) sweep() {
+	for key, t := range r.images {
+		if r.frame-t.lastFrame > 240 {
+			glDeleteTextures(1, &t.tex)
+			delete(r.images, key)
+		}
+	}
+	for key, t := range r.canvases {
+		if c := t.canvas.Value(); c == nil || c.Transient && t.lastFrame != r.frame {
+			r.deleteCanvas(t)
+			delete(r.canvases, key)
+		}
+	}
+}
