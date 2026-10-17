@@ -37,11 +37,15 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	case platform.SurfaceFrame:
 		rt.surfaceFrame()
 	case platform.SurfaceResize:
-		if rt.touch.active {
-			// A resize ends the contact: the container it began on and
-			// what it was over are no longer where they were.
+		// A resize ends a contact that is selecting, or one that was about
+		// to scroll a container and has not begun: the boxes those were
+		// measured against are gone. A contact that is already scrolling
+		// goes on — the keyboard opening is the resize this happens on, and
+		// the finger that opened it is still on the surface, so ending the
+		// contact here would stop the scroll the tap began.
+		if rt.touch.active && (rt.touch.selecting || rt.touch.scrollTarget != 0 && !rt.touch.scrolling) {
 			rt.cancelPointer()
-			rt.touch.active, rt.touch.scrolling = false, false
+			rt.touch.active = false
 		}
 		rt.cancelTouchBack()
 		rt.requestFrame()
