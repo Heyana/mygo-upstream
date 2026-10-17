@@ -171,6 +171,24 @@ func (m *linkMatch) setCells(cols []int, start int) {
 	}
 }
 
+// An indented continuation has gaps between its display rows. Only underline
+// and hit-test the actual path cells in the pointed row, never table padding.
+func (m *linkMatch) setCellsInRow(cols []int, start, row, width int) {
+	offset := (row - start) * width
+	m.cellA, m.cellB, m.row = width, 0, row
+	for i := m.start; i < m.end; i++ {
+		x := cols[i] - offset
+		if x < 0 || x >= width {
+			continue
+		}
+		right := x + 1
+		if i+1 < len(cols) && cols[i+1]-offset < width {
+			right = max(right, cols[i+1]-offset)
+		}
+		m.cellA, m.cellB = min(m.cellA, x), max(m.cellB, right)
+	}
+}
+
 // Some TUIs draw each display row themselves instead of letting the emulator
 // wrap it. Recover file references at those edges, without changing the VT's
 // actual line boundaries (selection, search and ordinary URLs still use them).
@@ -203,7 +221,11 @@ func (v *view) hardWrappedFileAt(col, row int) linkMatch {
 			for b < len(next) && !unicode.IsSpace(next[b]) && !strings.ContainsRune(linkProseDelimiters, next[b]) {
 				b++
 			}
-			if a == b || nc[a] > 4 || !fileContinuation(string(next[a:b])) {
+			edge := matchLink(text, cols, cols[len(cols)-1])
+			// A table continuation starts at its cell's left edge, which can
+			// be far from column zero but must not pass the original path.
+			indent := max(4, cols[edge.start]%v.cols)
+			if a == b || nc[a] > indent || !fileContinuation(string(next[a:b])) {
 				break
 			}
 			text = append(text, next[a:b]...)
@@ -213,7 +235,10 @@ func (v *view) hardWrappedFileAt(col, row int) linkMatch {
 			if end+1 >= row {
 				m := matchLink(text, cols, col+(row-start)*v.cols)
 				if m.valid() && (m.Path != "" || strings.HasPrefix(m.URL, "file://")) {
-					m.setCells(cols, start)
+					m.setCellsInRow(cols, start, row, v.cols)
+					if col < m.cellA || col >= m.cellB {
+						break
+					}
 					// Keep reading if another row may finish the filename.
 					if b < len(next) || end+1 == last || !unfinishedFileAtEdge(text, cols) ||
 						v.cols-nc[b-1]-1 > 8 {
