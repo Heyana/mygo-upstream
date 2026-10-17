@@ -59,6 +59,19 @@ class MygoActivity : Activity() {
             }
         }
 
+        // 🔴 让窗口自己处理 insets。targetSdk 36 强制 edge-to-edge，但如果不
+        // 明确说不 fit，平台仍按旧行为把内容挤开 —— 而在这个过程中
+        // `WindowInsets.Type.ime()` 不会派发到 View：键盘"已显示"
+        // （mInputShown=true、IME 窗口有 surface），insets 里却始终没有它，
+        // 于是没有任何东西让位，键盘被压在内容下面看不见。
+        //
+        // false = 内容画到系统栏与键盘下面，各让多少由 Go 侧的布局按
+        // MygoView.reportSafeArea 报上来的值做 —— 与本文件上面
+        // layoutInDisplayCutoutMode 的分工一致：这里只允许画过去，躲多少在 Go。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false)
+        }
+
         view = MygoView(this)
         // 单层 View 层级：SurfaceView 直接作为 content view。
         setContentView(view)

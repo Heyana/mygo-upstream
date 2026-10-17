@@ -76,6 +76,14 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         // 系统只给**已经 attach 到窗口**的 View 派发 inset，构造函数里调
         // 是一次空操作（实测：这么写 nativeOnSafeArea 一次都没被调用，
         // Go 侧的 safe area 恒为零）。见 onAttachedToWindow。
+        // 🔴 surface 默认在所有窗口 content 之下，键盘（另一个窗口）弹出来时
+        // 会被这块 surface 盖住：dumpsys 里 InputMethod 窗口 isVisible=true、
+        // mInputShown=true、输入法进程前台，屏幕上却只剩我们自己的工具条。
+        // MEDIA_OVERLAY 把这块 surface 提到 media 层之上，键盘就在它上面了。
+        //
+        // 只能 MediaOverlay，不能 setZOrderOnTop(true)：那会把 surface 提到
+        // **窗口**之上，键盘同样被盖，而且状态栏/通知栏也会被压住。
+        setZOrderMediaOverlay(true)
         // 保持这一层 View 极简：SurfaceView 之下不再叠别的 View。
         // 🔴 不要在 setContentView(SurfaceView) 之后又往同一个容器里加会改变
         //    surface z-order 语义的 View（那会让 SurfaceView 从「独立合成层」
@@ -206,10 +214,20 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
      * 为什么用 `getInsets` 家族而不是 `getSystemWindowInsets`（后者已废弃）：
      *  · systemBars() = 状态栏 + 导航栏 + 灵动岛（displayCutout 之外的那部分）
      *  · displayCutout() = 刘海/挖孔
-     *  两者取并集才是"设备自己画的、会压住内容的东西"。IME（键盘）**不算**：
-     *  它不是设备画的，而是用户唤起的，且有独立的 adjustResize 路径
-     *  （Manifest 里 windowSoftInputMode=adjustResize），混进来会让布局
-     *  在键盘弹出时平白缩一圈。
+     *  两者取并集才是"设备自己画的、会压住内容的东西"。
+     *
+     * 🔴 IME（键盘）单独报，不算进 SafeArea。
+     *
+     * 原来这里写着"IME 不算，它有独立的 adjustResize 路径"。那个前提在
+     * targetSdk 36 上不成立了：Android 16 强制 edge-to-edge（窗口 attrs 里
+     * 就是 EDGE_TO_EDGE_ENFORCED），adjustResize **不再压缩窗口**，键盘只是
+     * 作为 ime inset 叠上来。于是键盘"已显示"（mInputShown=true、IME 窗口
+     * 存在），却没有任何东西给它让位 —— 终端全屏画在它下面，键盘被自己的
+     * 零高度可视区吃掉了，屏幕上只剩我们自己的工具条。
+     *
+     * 所以：SafeArea 仍只报设备画的（状态栏、挖孔、手势条），IME 的高度
+     * 用 Native.onImeInsets 单独报，Go 把终端让开那一段 —— 与 iOS 上
+     * UIKeyboardFrame 的角色相同，但那条路径在 Android 上从来没有过。
      */
     private fun reportSafeArea() {
         val insets = rootWindowInsets ?: return
@@ -218,10 +236,24 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         val bars = insets.getInsets(WindowInsets.Type.systemBars())
         val cut = insets.getInsets(WindowInsets.Type.displayCutout())
         fun dip(px: Int): Int = Math.round(px / d)
+        // 🔴 键盘计入 bottom：在 targetSdk 36 的强制 edge-to-edge 下，
+        // adjustResize 不再压缩窗口，IME 只是作为 inset 叠在内容上。不让位的
+        // 话终端全屏画在键盘下面，而键盘的可视区被吃掉 —— "mInputShown=true
+        // 但屏幕上没有键盘"就是这么来的。
+        //
+        // 用 isVisible + getInsets：动画期间 isVisible 已是真，而 getInsets
+        // 给的是动画结束的目标高度，所以内容一次让到位，不会逐帧跳。
+        //
+        // 与手势条取较大值而不是相加：键盘弹起时它盖住手势条，两者不叠加。
+        val ime = if (insets.isVisible(WindowInsets.Type.ime())) {
+            insets.getInsets(WindowInsets.Type.ime()).bottom
+        } else {
+            0
+        }
         Native.onSafeArea(
             dip(maxOf(bars.top, cut.top)),
             dip(maxOf(bars.right, cut.right)),
-            dip(maxOf(bars.bottom, cut.bottom)),
+            dip(maxOf(bars.bottom, cut.bottom, ime)),
             dip(maxOf(bars.left, cut.left)),
         )
     }
@@ -316,7 +348,7 @@ class MygoView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         // 结束 —— 设成 IME_ACTION_SEND 之类之后，回车键才会变成一个真正的
         // 「动作键」，由 performEditorAction 送回按键路径，而不是被输入法
         // 当成编辑自己消费掉。
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or returnAction()
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_ACTION_NONE // TEMP-TEST
         return MygoImeConnection(this)
     }
 
