@@ -126,4 +126,3 @@ func versionString() string { return goString(glGetString(glVersion)) }
 
 // rendererString names the current context's renderer.
 func rendererString() string { return goString(glGetString(glRenderer)) }
-
