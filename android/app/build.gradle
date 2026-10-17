@@ -76,6 +76,19 @@ android {
         }
     }
 
+    // 🔴 必须解压 .so 到磁盘（useLegacyPackaging），不能留 extractNativeLibs=false。
+    //
+    // 默认（AGP 8+）是把 .so 原样留在 APK 的 lib/ 里、运行时直接 mmap，
+    // 于是 srcDir 的 nativeLibraryDir 是**空目录**。libghostty-vt 是用 purego
+    // 在运行时 dlopen 的，它要一个真实文件路径——从 zip 里映射出来的 .so
+    // 拿不到，报 "undefined symbol: ghostty_terminal_new"，而那个符号其实
+    // 就在库里。解压出来就好了。
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     buildTypes {
         debug {
             minifyEnabled false
