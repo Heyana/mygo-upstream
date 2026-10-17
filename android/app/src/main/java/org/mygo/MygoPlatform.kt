@@ -14,11 +14,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.MediaStore
-import com.google.zxing.BinaryBitmap
-import com.google.zxing.MultiFormatReader
-import com.google.zxing.NotFoundException
-import com.google.zxing.RGBLuminanceSource
-import com.google.zxing.common.HybridBinarizer
 import android.graphics.Rect
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -138,6 +133,17 @@ object MygoPlatform {
         createNotificationChannel(activity)
         host.accessibilityDelegate = MygoAccessibilityDelegate()
         nativeAttach()
+        // OpenCV 的 .so 约 2MB，加载要几十毫秒。放在这里会拖首帧，所以丢到
+        // 后台预热；真扫码时（用户还得先对准、按快门）基本已经就绪。
+        // 失败不影响 app：扫码时会再试一次，仍失败就报 ErrCameraUnavailable。
+        Thread {
+            try {
+                val ok = org.opencv.android.OpenCVLoader.initLocal()
+                android.util.Log.i("mygo", "openCV initLocal=$ok")
+            } catch (e: Throwable) {
+                android.util.Log.w("mygo", "openCV initLocal failed: $e")
+            }
+        }.start()
     }
 
     /** Activity 销毁时调用：放开对 Activity/View 的引用。Go 侧不需要额外的 detach。 */
@@ -981,7 +987,6 @@ object MygoPlatform {
     private external fun nativeAccessibilityAction(id: Long, action: ByteArray)
 
     /** 扫码结果回传：token 对应 Go 侧的请求，code 见 ScanResult 的注释。 */
-    private external fun nativeScanResult(token: Long, text: ByteArray, code: Int)
 
     // ── 扫码（系统相机/相册 + 解码）─────────────────────────────────────
     //
@@ -991,43 +996,102 @@ object MygoPlatform {
     //
     // 解码用 ZXing core（纯 Java，无 NDK）。它不依赖任何 UI，也不申请权限。
 
+    /**
+     * 把扫码结果存起来，等 Go 侧来取。
+     *
+     * 🔴 这套 bridge 是**单向**的：Go 用 jmethodID 调 Java，Java 从不回头调 Go。
+     * 所以结果不能「推」过去，只能存下、由 Go 侧的 collectScanResults 轮询
+     * takeScanResult 拿走。一开始我按 //export 写了推送，那个符号根本没注册，
+     * 传过去的字符串也就成了垃圾。
+     *
+     * 编码格式："<code>\n<token>\n<text>"，与 Go 侧的 takeScanResult 对应。
+     */
+    private var pendingResult: String? = null
+
+    private fun deliverScanResult(token: Long, text: String?, code: Int) {
+        pendingResult = "$code\n$token\n" + (text ?: "")
+        android.util.Log.i("mygo", "scan: deliver code=$code len=${text?.length ?: 0}")
+    }
+
+    /** Go 侧轮询调用：取走待发的结果，没有就返回 null。 */
+    fun takeScanResult(): String? = pendingResult.also { pendingResult = null }
+
     private var scanToken: Long = 0
     private var pendingScanToken: Long = 0
+    /** 相机要写的那个文件；onScanResult 读完就删。 */
+    private var scanFile: java.io.File? = null
 
     /**
-     * 打开取景界面。返回 false 表示连 Intent 都起不来（没有相机应用、被策略拦）。
+     * 打开系统相机拍一张。返回 false 只在连 Intent 都起不来时（没有相机应用）。
      *
-     * 真正的结果异步回到 [onScanPicked]，那时才调 nativeScanResult。
+     * 🔴 **不要用 `resolveActivity` 判断有没有相机。** Android 11 起包可见性
+     * 会把没声明在 `<queries>` 里的包过滤掉，`resolveActivity` 就返回 null——
+     * 设备上有相机也一样。这里按官方写法直接 try/catch 启动，`ActivityNotFound`
+     * 才是「真没有」。Manifest 里同时声明了 queries，两者一起才可靠。
+     *
+     * 结果异步回到 [onScanResult]，那时才调 deliverScanResult。
      */
     fun startScan(token: Long, prompt: ByteArray): Boolean {
         val ctx = activity ?: return false
         pendingScanToken = token
+        scanToken = token
+        // 先开相册，不开相机。
+        //
+        // 理由：相册里的图是**已经拍好的、清晰的、静止的**，解出来的成功率远高于
+        // 现场手持拍屏幕——实测手持拍一张，对焦稍偏 OpenCV 就解不出。桌面上
+        // 显示二维码时，用系统相机拍一张再回来选，是更稳的路子；用户也能直接
+        // 截屏后选那张截图。
+        //
+        // 相册也不行时（没有照片选择器），才退回相机。
         return try {
-            val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-            if (intent.resolveActivity(ctx.packageManager) == null) {
-                // 没有相机应用：退回相册。
-                Intent(
-                    Intent.ACTION_PICK,
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                )
-            } else {
-                intent
-            }.let { pick ->
-                scanToken = token
-                ctx.startActivityForResult(pick, SCAN_REQUEST)
-                true
-            }
+            ctx.startActivityForResult(
+                Intent(MediaStore.ACTION_PICK_IMAGES).apply { type = "image/*" },
+                SCAN_REQUEST,
+            )
+            android.util.Log.i("mygo", "scan: photo picker up")
+            true
         } catch (e: Exception) {
-            android.util.Log.w("mygo", "startScan failed: $e")
-            false
+            android.util.Log.w("mygo", "scan: no photo picker, trying the camera: $e")
+            tryCamera(ctx)
         }
+    }
+
+    /** 拍照。相册不可用时才走这里。 */
+    private fun tryCamera(ctx: Activity): Boolean = try {
+        // 🔴 EXTRA_OUTPUT 必须有。没有它，ACTION_IMAGE_CAPTURE 回来的只是
+        // extras["data"] 里的一张**缩略图**（约 100~200px），一张缩略图里的
+        // 二维码基本解不出来。
+        //
+        // 🔴 路径必须是 externalCacheDir，不能用 cacheDir。私有缓存
+        // （/data/data/<pkg>/cache）相机应用没有写权限，一部分厂商相机会
+        // 默默写失败、然后返回 RESULT_CANCELED。
+        val dir = ctx.externalCacheDir ?: ctx.cacheDir
+        dir.mkdirs()
+        val file = java.io.File(dir, "scan-${pendingScanToken}.jpg")
+        if (file.exists()) file.delete()
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            ctx, "${ctx.packageName}.fileprovider", file,
+        )
+        scanFile = file
+        ctx.startActivityForResult(
+            Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                .putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION),
+            SCAN_REQUEST,
+        )
+        android.util.Log.i("mygo", "scan: camera up, output=$uri")
+        true
+    } catch (e: Exception) {
+        android.util.Log.w("mygo", "scan: could not start the camera: $e")
+        pendingScanToken = 0
+        false
     }
 
     /** 取景界面被收起，但没有结果（用户返回）。 */
     fun cancelScan(token: Long): Boolean {
         if (pendingScanToken != token) return false
         pendingScanToken = 0
-        onUi { nativeScanResult(token, ByteArray(0), SCAN_CANCELED) }
+        onUi { deliverScanResult(token, null, SCAN_CANCELED) }
         return true
     }
 
@@ -1038,36 +1102,74 @@ object MygoPlatform {
      * 会卡住界面。
      */
     fun onScanResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode != SCAN_REQUEST) return
-        val token = pendingScanToken
-        pendingScanToken = 0
-        if (token == 0L) return
-        val ctx = activity
-        if (resultCode != Activity.RESULT_OK || data == null || ctx == null) {
-            nativeScanResult(token, ByteArray(0), SCAN_CANCELED)
+        if (requestCode != SCAN_REQUEST) {
+            android.util.Log.i("mygo", "scan: ignoring result for code $requestCode")
             return
         }
-        // 拍照给的是缩略图（data.extras 的 "data"），相册给的是 Uri；两者都试。
+        val token = pendingScanToken
+        pendingScanToken = 0
+        if (token == 0L) {
+            android.util.Log.w("mygo", "scan: result with no pending token")
+            return
+        }
+        val ctx = activity
+        android.util.Log.i(
+            "mygo", "scan: result token=$token code=$resultCode data=${data != null} file=${scanFile?.length() ?: -1}",
+        )
+        if (ctx == null) {
+            deliverScanResult(token, null, SCAN_CANCELED)
+            return
+        }
+        // 🔴 不看 resultCode 就判取消，是错的。厂商相机（ColorOS 实测）会用
+        // EXTRA_OUTPUT 把照片写进我们给的 Uri，然后**仍然返回 RESULT_CANCELED**
+        // ——文件好好的，结果码是取消。它以「文件里有没有东西」为准：
+        // 有照片就去解，解不出才是「没找到码」；只有文件也没写时才算取消。
+        val wrote = scanFile?.let { it.exists() && it.length() > 0 } ?: false
+        // 相册回来时照片在 data.data 的 Uri 里，没有文件、可能也没有 OK：
+        // 只要有「能解的东西」就不当取消。
+        val haveImage = wrote || data?.data != null || data?.extras?.get("data") != null
+        if (resultCode != Activity.RESULT_OK && !haveImage) {
+            android.util.Log.i("mygo", "scan: canceled, no file written")
+            deliverScanResult(token, null, SCAN_CANCELED)
+            return
+        }
+        if (resultCode != Activity.RESULT_OK) {
+            android.util.Log.i("mygo", "scan: resultCode=$resultCode but there is an image; decoding it")
+        }
+        // 三处来源，按「能解出码」的可能性排序：
+        //   1. EXTRA_OUTPUT 写的那个文件 —— 全尺寸，首选
+        //   2. data.extras["data"] —— 缩略图，只在没给 EXTRA_OUTPUT 时出现
+        //   3. data.data 的 Uri —— 相册选的图
         @Suppress("DEPRECATION")
-        val thumb = data.extras?.get("data") as? android.graphics.Bitmap
-        val uri = data.data
+        val thumb = data?.extras?.get("data") as? android.graphics.Bitmap
+        val uri = data?.data
+        val file = scanFile
         Thread {
             val text = try {
                 val bitmap = when {
+                    file != null && file.length() > 0 -> android.graphics.BitmapFactory.decodeFile(file.path)
                     thumb != null -> thumb
                     uri != null -> MediaStore.Images.Media.getBitmap(ctx.contentResolver, uri)
                     else -> null
                 }
+                android.util.Log.i(
+                    "mygo", "scan: decoded bitmap=" + (bitmap?.let { "${it.width}x${it.height}" } ?: "null"),
+                )
                 bitmap?.let { decodeQr(it) }
             } catch (e: Exception) {
-                android.util.Log.w("mygo", "scan decode failed: $e")
+                android.util.Log.w("mygo", "scan: decode threw: $e")
+                null
+            } catch (e: OutOfMemoryError) {
+                android.util.Log.w("mygo", "scan: bitmap too large: $e")
                 null
             }
+            file?.delete()
+            android.util.Log.i("mygo", "scan: text=" + (text?.take(60) ?: "null"))
             onUi {
                 if (text.isNullOrEmpty()) {
-                    nativeScanResult(token, ByteArray(0), SCAN_NOT_FOUND)
+                    deliverScanResult(token, null, SCAN_NOT_FOUND)
                 } else {
-                    nativeScanResult(token, text.toByteArray(Charsets.UTF_8), SCAN_OK)
+                    deliverScanResult(token, text, SCAN_OK)
                 }
             }
         }.start()
@@ -1075,17 +1177,60 @@ object MygoPlatform {
 
     /** 用 ZXing 在一张位图里找 QR 码；找不到返回 null。 */
     private fun decodeQr(bitmap: android.graphics.Bitmap): String? {
-        val w = bitmap.width
-        val h = bitmap.height
-        val pixels = IntArray(w * h)
-        bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-        val source = RGBLuminanceSource(w, h, pixels)
-        val binary = BinaryBitmap(HybridBinarizer(source))
+        // 用 OpenCV 的 QRCodeDetector，不用 ZXing。
+        //
+        // 实测数据（同一张 3072×4096 的清晰照片，拍的是桌面屏幕上的码）：
+        //   · OpenCV  cvtColor + QRCodeDetector  → 解出 retty://connect?address=tcpGFw...
+        //   · ZXing   RGBLuminanceSource          → null
+        //   · ZXing   先转灰度再喂                  → null
+        // 所以问题不在灰度，在检测器本身：ZXing 对「拍屏幕」那种带摩尔纹、
+        // 低对比度的输入就是不如 OpenCV。既然手机上已经能装 OpenCV，
+        // 就用能解出来的那个。
+        //
+        // 缩到 2000px 以内再喂：4096 的边长只会更慢，40cm 外拍 A4 上的码，
+        // 2000px 已经绰绰有余。
+        val scaled = scaleDown(bitmap, 2000)
+        val w = scaled.width
+        val h = scaled.height
+        val rgba = IntArray(w * h)
+        scaled.getPixels(rgba, 0, w, 0, 0, w, h)
+        // OpenCV 的 Mat 要 BGRA，Android 的像素是 ARGB：交换 R 与 B。
+        val bgra = ByteArray(w * h * 4)
+        for (i in rgba.indices) {
+            val c = rgba[i]
+            val o = i * 4
+            bgra[o] = (c and 0xFF).toByte()            // B
+            bgra[o + 1] = ((c shr 8) and 0xFF).toByte()  // G
+            bgra[o + 2] = ((c shr 16) and 0xFF).toByte() // R
+            bgra[o + 3] = ((c shr 24) and 0xFF).toByte() // A
+        }
         return try {
-            MultiFormatReader().decode(binary).text
-        } catch (e: NotFoundException) {
+            val mat = org.opencv.core.Mat(h, w, org.opencv.core.CvType.CV_8UC4)
+            mat.put(0, 0, bgra)
+            val gray = org.opencv.core.Mat()
+            org.opencv.imgproc.Imgproc.cvtColor(mat, gray, org.opencv.imgproc.Imgproc.COLOR_BGRA2GRAY)
+            val detector = org.opencv.objdetect.QRCodeDetector()
+            val points = org.opencv.core.Mat()
+            val text = detector.detectAndDecode(gray, points)
+            mat.release()
+            gray.release()
+            points.release()
+            val t = if (text.isNullOrEmpty()) null else text
+            android.util.Log.i("mygo", "scan: OpenCV decoded ${w}x$h -> " + (t?.take(60) ?: "null"))
+            t
+        } catch (e: Throwable) {
+            android.util.Log.w("mygo", "scan: OpenCV threw: $e")
             null
         }
+    }
+
+    private fun scaleDown(src: android.graphics.Bitmap, maxSide: Int): android.graphics.Bitmap {
+        val longest = maxOf(src.width, src.height)
+        if (longest <= maxSide) return src
+        val k = maxSide.toFloat() / longest
+        return android.graphics.Bitmap.createScaledBitmap(
+            src, (src.width * k).toInt(), (src.height * k).toInt(), true,
+        )
     }
 
     // ── 安全存储（Keystore）─────────────────────────────────────────────

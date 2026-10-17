@@ -74,6 +74,57 @@
             android:name=".MygoPlatform$NotificationReceiver"
             android:exported="false" />
 
+        <!--
+          扫码用的写入口：相机把全尺寸照片写进本应用的 cache。
+          exported=false + grantUriPermissions，只有拿到授权的那个相机应用能写。
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
+
+    <!--
+      【queries：让 resolveActivity 也能回答，但不是必需的】
+
+      Android 11（API 30）起有「包可见性」：targetSdk ≥ 30 的 app 默认看不见
+      别的 app，所以 `intent.resolveActivity()` / `queryIntentActivities()`
+      会**返回 null / 空列表**——即使设备上明明装着相机。这不是「没有相机」，
+      是「没被允许看」。
+
+      🔴 这个坑真踩过：扫码判断写成 `if (resolveActivity == null) → 退回相册`，
+      于是在装有相机的小米上走成了相册分支，而相册用的 `ACTION_PICK` 在
+      Android 16 上同样受限，最后两个都没起来，点一下什么都没发生。
+
+      **修法主要是代码，不是这里**：startScan 与 openExternalUrl 一样，
+      不查询、直接 startActivity 并捕获 ActivityNotFoundException
+      （见 MygoPlatform.kt）。只靠 try/catch 时本段其实可以省掉。
+
+      留着这段的理由：MygoPlatform 里若有人（或将来的代码）要**列出**可用相机、
+      或要对某个 action 做 resolveActivity 判断，没有它就会拿到空结果。
+      两个 action 只声明「我要看谁处理这个意图」，不申请任何权限，
+      也不需要 QUERY_ALL_PACKAGES（那个要过 Google 审核）。
+    -->
+    <queries>
+        <!-- 拍照：系统相机应用 -->
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <!-- 选图：系统照片选择器（Android 13+，photo picker） -->
+        <intent>
+            <action android:name="android.provider.action.PICK_IMAGES" />
+        </intent>
+        <!-- 老的相册入口，作为 ACTION_PICK_IMAGES 的退路 -->
+        <intent>
+            <action android:name="android.intent.action.PICK" />
+            <data android:mimeType="image/*" />
+        </intent>
+    </queries>
 
 </manifest>

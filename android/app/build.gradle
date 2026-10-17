@@ -133,5 +133,16 @@ android {
 // 扫码解码用 ZXing core：纯 Java、无 NDK、不申请权限。
 // 不引 camera-x / ML Kit —— 这里只解码已经拿到的一张图，不需要相机栈。
 dependencies {
-    implementation 'com.google.zxing:core:3.5.3'
+    // FileProvider：把 cache 里的照片以 content:// 交给系统相机写。
+    // 只为了这一个类也值得——手写 content provider 是更多代码、更容易错。
+    implementation 'androidx.core:core:1.13.1'
+
+    // 二维码解码用 OpenCV 的 QRCodeDetector。
+    //
+    // 为什么不用 ZXing：实测同一张 3072×4096 的清晰照片，OpenCV 能解出
+    // retty://connect?address=tcpGFw... ，ZXing（RGBLuminanceSource +
+    // HybridBinarizer）返回 null，转灰度后仍然 null。ZXing 对「拍屏幕」
+    // 这类低对比度、带摩尔纹的输入就是不如 OpenCV 稳。
+    // AAR 里的 .so 只有 2MB 左右，且已按 16KB 页对齐（AGP 8+ 自动处理）。
+    implementation 'org.opencv:opencv:4.11.0'
 }

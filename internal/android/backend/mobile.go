@@ -14,6 +14,7 @@ package backend
 
 import (
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -59,6 +60,7 @@ func (m androidMobile) ScanCode(o platform.ScanOptions, done func(string, error)
 	}
 	token := nextToken()
 	scanTokens.Store(token, done)
+	log.Printf("mygo/android: scan: ScanCode token=%d bridge=%v", token, platformBridge() != nil)
 	if err := platformBridge().ScanCode(token, o.Prompt); err != nil {
 		scanTokens.Delete(token)
 		done("", err)
@@ -99,6 +101,7 @@ func ScanResult(token uint64, text string, code int32) {
 		return
 	}
 	done := v.(func(string, error))
+	log.Printf("mygo/android: ScanResult code=%d len=%d head=%q", code, len(text), truncate(text, 40))
 	switch code {
 	case 0:
 		if text == "" {
@@ -117,4 +120,11 @@ func ScanResult(token uint64, text string, code int32) {
 	default:
 		done("", errScanFailed)
 	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

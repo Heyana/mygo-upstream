@@ -61,6 +61,7 @@ static jmethodID mygo_mid_secret_get = NULL;
 static jmethodID mygo_mid_secret_delete = NULL;
 static jmethodID mygo_mid_scan = NULL;
 static jmethodID mygo_mid_scan_cancel = NULL;
+static jmethodID mygo_mid_take_scan = NULL;
 
 // mygo_platform_exception clears a pending Java exception and reports whether
 // there was one.
@@ -471,6 +472,7 @@ static jint mygo_platform_attach(JNIEnv *env, jobject thiz) {
 		{"secretDelete", "([B[B)Z", &mygo_mid_secret_delete},
 		{"startScan", "(J[B)Z", &mygo_mid_scan},
 		{"cancelScan", "(J)Z", &mygo_mid_scan_cancel},
+		{"takeScanResult", "()Ljava/lang/String;", &mygo_mid_take_scan},
 	};
 	int count = (int)(sizeof(lookups) / sizeof(lookups[0]));
 	for (int n = 0; n < count; n++) {
@@ -545,6 +547,30 @@ static jint mygo_platform_scan(jlong token, const char *prompt, int prompt_len) 
 	}
 	return ok == JNI_TRUE ? 0 : 1;
 }
+// mygo_platform_take_scan_result asks the Java side for the pending scan
+// result and copies it out as a malloc'd C string. It returns NULL when there
+// is nothing to report; *code is then untouched.
+static const char *mygo_platform_take_scan_result(void) {
+	JNIEnv *env = mygo_platform_env();
+	if (env == NULL || mygo_platform_obj == NULL || mygo_mid_take_scan == NULL) {
+		return NULL;
+	}
+	jstring js = (jstring)(*env)->CallObjectMethod(env, mygo_platform_obj, mygo_mid_take_scan);
+	if (mygo_platform_exception(env) || js == NULL) {
+		return NULL;
+	}
+	const char *utf = (*env)->GetStringUTFChars(env, js, NULL);
+	if (utf == NULL) {
+		(*env)->DeleteLocalRef(env, js);
+		return NULL;
+	}
+	char *out = strdup(utf);
+	(*env)->ReleaseStringUTFChars(env, js, utf);
+	(*env)->DeleteLocalRef(env, js);
+	// 编码格式："<code>\n<token>\n<text>"，三样一次带走。
+	return out;
+}
+
 static jint mygo_platform_scan_cancel(jlong token) {
 	JNIEnv *env = mygo_platform_env();
 	if (env == NULL || mygo_platform_obj == NULL || mygo_mid_scan_cancel == NULL) {
@@ -561,7 +587,9 @@ import "C"
 
 import (
 	"errors"
+	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/egoist/mygo/internal/android/backend"
@@ -827,9 +855,57 @@ func (androidJNI) ScanCode(token uint64, prompt string) error {
 	case -1:
 		return backend.ErrPlatformBridge
 	case 0:
+		go collectScanResults()
 		return nil
 	}
 	return backend.ErrScanUnavailable
+}
+
+// collectScanResults polls the Java side until it hands over an answer.
+//
+// The bridge is one-way — Go calls Java through jmethodID, and nothing on the
+// Java side calls back into Go — so a scan cannot arrive as a JNI entry point.
+// Polling is the shape that fits: the wait is a person holding a camera or
+// picking a photo (seconds), and one getString every 150ms costs nothing.
+// It stops as soon as an answer is taken, or after a minute, which is longer
+// than anyone leaves a camera up.
+func collectScanResults() {
+	const interval = 150 * time.Millisecond
+	deadline := time.Now().Add(time.Minute)
+	for time.Now().Before(deadline) {
+		if code, token, text, ok := takeScanResult(); ok {
+			backend.ScanResult(token, text, code)
+			return
+		}
+		time.Sleep(interval)
+	}
+}
+
+// takeScanResult pulls one pending result from the Java side, if there is one.
+// The encoding is "<code>\n<token>\n<text>": code first so a malformed tail
+// still says whether the scan failed as canceled or as a decode miss.
+func takeScanResult() (code int32, token uint64, text string, ok bool) {
+	raw := C.mygo_platform_take_scan_result()
+	if raw == nil {
+		return 0, 0, "", false
+	}
+	defer C.free(unsafe.Pointer(raw))
+	parts := strings.SplitN(C.GoString(raw), "\n", 3)
+	if len(parts) < 2 {
+		return 0, 0, "", false
+	}
+	code64, err := strconv.ParseInt(parts[0], 10, 32)
+	if err != nil {
+		return 0, 0, "", false
+	}
+	n, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, "", false
+	}
+	if len(parts) == 3 {
+		text = parts[2]
+	}
+	return int32(code64), n, text, true
 }
 
 // ScanCancel takes the picker down, if it is still up.
@@ -841,15 +917,6 @@ func (androidJNI) ScanCancel(token uint64) error {
 		return backend.ErrPlatformBridge
 	}
 	return nil
-}
-
-//export Java_org_mygo_MygoPlatform_nativeScanResult
-func Java_org_mygo_MygoPlatform_nativeScanResult(env *C.JNIEnv, cls C.jclass, token C.jlong, text *C.char, code C.jint) {
-	t := C.GoString(text)
-	c := int32(code)
-	// On the pump, as every platform callback is: the done this answers may
-	// touch the app's state and its view.
-	theBackend.Post(func() { backend.ScanResult(uint64(token), t, c) })
 }
 
 // accessibilityCode maps mygo's accessibility to the int the Java side takes.
