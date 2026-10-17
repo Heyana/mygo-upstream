@@ -473,6 +473,10 @@ func (t *tray) SetImage(png []byte, template bool) error {
 	return nil
 }
 
+// Dark reports false: AppIndicator tells nothing of the panel, whose
+// icon theme draws the icon in its own colors.
+func (t *tray) Dark() bool { return false }
+
 // SetID does nothing: the indicator's ID is given as it is made, and
 // panels place indicators themselves.
 func (t *tray) SetID(string) {}

@@ -280,6 +280,8 @@ type tray struct {
 	item   id
 	button id
 	owner  int
+	// dark is the menu bar's appearance, as last told.
+	dark bool
 }
 
 func registerTrayTarget() {
@@ -294,6 +296,19 @@ func registerTrayTarget() {
 				t.h.RightClicked()
 			} else {
 				t.h.Clicked()
+			}
+		}),
+		// The menu bar under the button turned dark or light: with the
+		// system's appearance, or the wallpaper under a translucent menu
+		// bar.
+		method("observeValueForKeyPath:ofObject:change:context:", func(self id, _ objc.SEL, keyPath, object, change id, ctx uintptr) {
+			t := theBackend.trays[object]
+			if t == nil {
+				return
+			}
+			if dark := t.Dark(); dark != t.dark {
+				t.dark = dark
+				t.h.AppearanceChanged()
 			}
 		}),
 	})
@@ -313,9 +328,27 @@ func (b *Backend) NewTray(h platform.TrayHandler) (platform.Tray, error) {
 		send(t.button, "setTarget:", uintptr(trayTarget))
 		send(t.button, "setAction:", uintptr(sel("mygoTrayClicked:")))
 		send(t.button, "sendActionOn:", 1<<2|1<<4) // left and right mouse up
+		send(t.button, "addObserver:forKeyPath:options:context:", uintptr(trayTarget), uintptr(nsString("effectiveAppearance")), 0, 0)
 	})
 	b.trays[t.button] = t
+	t.dark = t.Dark()
 	return t, nil
+}
+
+// Dark reports whether the menu bar under the button is dark, as AppKit
+// draws its own status items: by the button's appearance, which follows
+// the menu bar's.
+func (t *tray) Dark() bool {
+	if t.item == 0 {
+		return false
+	}
+	dark := false
+	withPool(func() {
+		names := nsArray(nsString("NSAppearanceNameAqua"), nsString("NSAppearanceNameDarkAqua"))
+		match := send(send(t.button, "effectiveAppearance"), "bestMatchFromAppearancesWithNames:", uintptr(names))
+		dark = match != 0 && goString(match) == "NSAppearanceNameDarkAqua"
+	})
+	return dark
 }
 
 // SetID gives the status item an autosave name: macOS keeps under it where
@@ -397,6 +430,7 @@ func (t *tray) Destroy() {
 		return
 	}
 	delete(t.b.trays, t.button)
+	send(t.button, "removeObserver:forKeyPath:", uintptr(trayTarget), uintptr(nsString("effectiveAppearance")))
 	dropOwner(t.owner)
 	send(send(class("NSStatusBar"), "systemStatusBar"), "removeStatusItem:", uintptr(t.item))
 	release(t.item)

@@ -344,6 +344,9 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 	case wmAppTray:
 		b.trayMessage(uint32(wp), uint32(loword(lp)))
 		return 0, true
+	case wmAppTrayAdd:
+		b.addNewTrays()
+		return 0, true
 	case wmHotkey:
 		b.h.HotkeyPressed(int(wp))
 		return 0, true
@@ -355,6 +358,7 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 		case lp != 0 && wstr(lp) == settingImmersiveColorSet:
 			b.applyTheme()
 			b.h.ThemeChanged()
+			b.traysAppearance()
 		case lp != 0 && wstr(lp) == settingIntl:
 			// The display languages or the regional formats.
 			b.h.LocaleChanged()
@@ -387,7 +391,9 @@ func (b *Backend) appMessage(m uint32, wp, lp uintptr) (uintptr, bool) {
 	if m == b.taskbarCreated && m != 0 {
 		// Explorer restarted: the notification area forgot our icons.
 		for _, t := range b.trays {
-			t.add()
+			if t.added {
+				t.add()
+			}
 		}
 		return 0, true
 	}
@@ -437,12 +443,35 @@ type appController struct{ b *Backend }
 
 func (a appController) SetActivationPolicy(string) {}
 
+// AllowForeground passes the app's right to the foreground on to the next
+// process to ask (ASFW_ANY). Only the process in front has it to pass on,
+// so an app passes it before it closes its windows: a process it starts
+// once they closed could no longer take it from the app.
+func (a appController) AllowForeground() {
+	const asfwAny = ^uintptr(0)
+	procAllowSetForegroundWindow.Call(asfwAny)
+}
+
+// Activate brings the app forward as macOS does, with its windows in their
+// order: a window of the app already in front stays there, else the one
+// the user had last, the highest of them in the z-order, comes forward.
+// Flyouts that never take the keyboard bring nothing forward.
 func (a appController) Activate() {
-	for _, w := range a.b.windows {
-		if w.IsVisible() {
-			w.Focus()
-			return
+	if fg, _, _ := procGetForegroundWindow.Call(); a.b.windows[fg] != nil {
+		return
+	}
+	const gwHwndNext = 2
+	h, _, _ := procGetTopWindow.Call(0)
+	for ; h != 0; h, _, _ = procGetNextWindow.Call(h, gwHwndNext) {
+		w := a.b.windows[h]
+		if w == nil || !w.IsVisible() {
+			continue
 		}
+		if f := w.opts.Flyout; f != nil && !f.Focusable {
+			continue
+		}
+		w.Focus()
+		return
 	}
 }
 

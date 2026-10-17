@@ -189,3 +189,31 @@ func TestTrayID(t *testing.T) {
 		t.Errorf("the icons were named %q", got)
 	}
 }
+
+// TestTrayDark tells an icon's listeners as the bar it shows on turns
+// dark or light, and not when it stays as it was.
+func TestTrayDark(t *testing.T) {
+	tray, err := NewTray(TrayOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tray.Destroy()
+	told := 0
+	off := tray.OnAppearanceChange(func() { told++ })
+	if tray.Dark() {
+		t.Error("the menu bar starts dark")
+	}
+	fb.SetTrayDark(true)
+	if !tray.Dark() || told != 1 {
+		t.Errorf("turned dark: Dark %v, told %d times", tray.Dark(), told)
+	}
+	fb.SetTrayDark(true)
+	if told != 1 {
+		t.Errorf("told %d times of no change", told)
+	}
+	off()
+	fb.SetTrayDark(false)
+	if tray.Dark() || told != 1 {
+		t.Errorf("turned light: Dark %v, told %d times after off", tray.Dark(), told)
+	}
+}

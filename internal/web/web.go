@@ -233,6 +233,7 @@ type app struct{}
 
 func (app) SetActivationPolicy(string)                        {}
 func (app) Activate()                                         {}
+func (app) AllowForeground()                                  {}
 func (app) Hide()                                             {}
 func (app) Unhide()                                           {}
 func (app) IsHidden() bool                                    { return js.Global().Get("document").Get("hidden").Bool() }

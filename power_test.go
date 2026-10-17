@@ -73,9 +73,15 @@ func TestDockMenuAndRelaunch(t *testing.T) {
 		t.Error("SetMenu(nil) kept the menu")
 	}
 
-	// A relaunch whose quit is canceled does nothing.
+	// A relaunch whose quit is canceled does nothing. Before the windows
+	// close, it lets the app it starts take the foreground, which the
+	// app gives up as they close (Windows).
 	canceled := make(chan struct{}, 1)
+	allowed := onMainValue(func() int { return fb.ForegroundAllowed })
 	off := App.OnBeforeQuit(func(e *QuitEvent) {
+		if fb.ForegroundAllowed != allowed+1 {
+			t.Errorf("the foreground was passed on %d times before the quit", fb.ForegroundAllowed-allowed)
+		}
 		e.PreventDefault()
 		canceled <- struct{}{}
 	})

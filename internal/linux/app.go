@@ -235,6 +235,8 @@ type appController struct{ b *Backend }
 
 func (a appController) SetActivationPolicy(string) {}
 
+func (a appController) AllowForeground() {}
+
 func (a appController) Activate() {
 	for _, w := range a.b.windows {
 		if gtkWidgetGetVisible(w.win) {

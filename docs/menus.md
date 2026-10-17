@@ -211,7 +211,23 @@ An app may show several icons, as a menu bar app showing its measures each
 in an item of its own. On macOS a new icon goes left of those already
 there, and the user moves icons by dragging them with ⌘ held: give each an
 `ID`, unique among the app's icons, and it goes back where the user put it
-whenever it is made again, at the next launch or after `Destroy`.
+whenever it is made again, at the next launch or after `Destroy`. On
+Windows, where the user chooses which icons show on the taskbar rather
+than in its overflow, an icon with an `ID` keeps that choice, whatever
+order the app makes its icons in.
+
+A template icon follows the menu bar by itself. An icon in color, as one
+drawing each of its measures in its own color, draws its ink for the bar
+it shows on: `Tray.Dark` reports whether that bar is dark (the macOS menu
+bar, as the system's appearance or the wallpaper under it tints it, or the
+Windows taskbar), and `OnAppearanceChange` tells when it turns, to set the
+icon again:
+
+```go
+draw := func() { tray.SetIcon(meterIcon(tray.Dark()), false) }
+tray.OnAppearanceChange(draw)
+draw()
+```
 
 `Tray.PopUpMenu` opens the menu set with `SetMenu` programmatically. On
 macOS, AppKit places it below the status item and highlights its button
