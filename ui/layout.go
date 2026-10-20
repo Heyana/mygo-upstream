@@ -558,11 +558,16 @@ func computeBox(e *node, w, h float32) {
 	if e.overflow != nil {
 		e.layoutToolbar(cw)
 	}
+	// A scrolling container lays its content out at its own size, not at an
+	// unbounded one: what overflows shows as the content that scrolls, not as
+	// the size the content would take. A child that scrolls itself is as tall
+	// as its rows, and an unbounded height here would hand it that height as
+	// its own, which is the size of every row it holds.
 	lw, lh := cw, ch
 	if e.flags&flagScrollX != 0 {
 		lw = inf
 	}
-	if e.flags&flagScrollY != 0 {
+	if e.flags&flagScrollY != 0 && !scrollsInside(e) {
 		lh = inf
 	}
 	uw, uh := boxLayout(e, lw, lh, true)
@@ -1383,4 +1388,15 @@ func attach(c, e *node, pw, ph float32) {
 	c.x = e.border[3] + ax*pw - sx*w + dx
 	c.y = e.border[0] + ay*ph - sy*h + dy
 	layoutBox(c, w, h)
+}
+
+// scrollsInside reports whether something in e scrolls vertically itself: such
+// a child takes the room e shows, and gives back the height of its content.
+func scrollsInside(e *node) bool {
+	for c := e.first; c != nil; c = c.next {
+		if c.flags&flagScrollY != 0 || scrollsInside(c) {
+			return true
+		}
+	}
+	return false
 }
