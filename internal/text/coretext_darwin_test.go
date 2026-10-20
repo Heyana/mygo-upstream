@@ -207,3 +207,45 @@ func TestCoreTextLanguageSpacing(t *testing.T) {
 		}
 	}
 }
+
+// The typesetter a text shapes into is shared across widths, so the key it
+// is cached by must hold every style that reaches the attributed string. A
+// key that missed one would answer a text of another style with this one's
+// glyphs — silently, as both lay out.
+func TestTypesetterCacheKeyedByStyle(t *testing.T) {
+	s := newSystem()
+	text := "Hello 世界"
+	// Same text and width, different styles: each must get its own layout.
+	plain := s.Layout(Params{Text: text, Width: 200, Style: Style{Size: 16}})
+	italic := s.Layout(Params{Text: text, Width: 200, Style: Style{Size: 16, Italic: true}})
+	spaced := s.Layout(Params{Text: text, Width: 200, Style: Style{Size: 16, LetterSpacing: 3}})
+	again := s.Layout(Params{Text: text, Width: 200, Style: Style{Size: 16}})
+
+	if sameGlyphs(italic, plain) {
+		t.Error("italic took the typesetter of the plain text")
+	}
+	if spaced.Width <= plain.Width {
+		t.Errorf("letter spacing of 3 leaves %q %v wide, not more than %v", text, spaced.Width, plain.Width)
+	}
+	if again.Width != plain.Width {
+		t.Errorf("the same style twice gives %v then %v wide", plain.Width, again.Width)
+	}
+}
+
+// sameGlyphs reports whether two layouts draw the same glyphs.
+func sameGlyphs(a, b *Layout) bool {
+	if len(a.Lines) != len(b.Lines) {
+		return false
+	}
+	for i := range a.Lines {
+		if len(a.Lines[i].Glyphs) != len(b.Lines[i].Glyphs) {
+			return false
+		}
+		for k := range a.Lines[i].Glyphs {
+			if a.Lines[i].Glyphs[k].ID != b.Lines[i].Glyphs[k].ID {
+				return false
+			}
+		}
+	}
+	return true
+}

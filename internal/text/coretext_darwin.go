@@ -412,6 +412,9 @@ type coreText struct {
 	// attrs are the attributes of strings in a font of primary, in each
 	// direction, without tracking or kerning, owned.
 	attrs map[attrsKey]uintptr
+	// typesetter 缓存：按（字体+方向+语言+文字+样式+spans），与宽度无关。
+	tsCache map[tsKey]uintptr
+	tsOrder []tsKey
 	// seg and breaks find where lines may break (lineBreaks).
 	seg    segmenter.Segmenter
 	breaks []bool
@@ -457,6 +460,7 @@ func newCoreText() (*coreText, error) {
 		native:     map[uintptr]*Font{},
 		oblique:    map[*Font]*Font{},
 		attrs:      map[attrsKey]uintptr{},
+		tsCache:    map[tsKey]uintptr{},
 		color:      map[uintptr]bool{},
 		registered: map[string][]registeredFace{},
 		bands:      map[bandKey][2]float32{},
@@ -971,11 +975,27 @@ func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, 
 		defer ct.release(styled)
 		attributed = styled
 	}
-	typesetter := ct.typesetterCreate(attributed)
-	if typesetter == 0 {
-		return nil
+	// typesetter 只依赖（文字+样式+attrs），不依赖宽度：宽度变时复用，
+	// 只重新断行（suggestLineBreak + typesetterCreateLine）。
+	tkey := tsKey{font: font, rtl: rtl, lang: lang, text: string(text), italic: style.Italic,
+		spacing: style.LetterSpacing, kernOff: noKerning(style.Features), spans: spanKey(spans)}
+	typesetter, cached := e.tsCache[tkey]
+	if !cached || typesetter == 0 {
+		typesetter = ct.typesetterCreate(attributed)
+		if typesetter == 0 {
+			return nil
+		}
+		if len(e.tsOrder) >= tsMax {
+			old := e.tsOrder[0]
+			e.tsOrder = e.tsOrder[1:]
+			if t, ok := e.tsCache[old]; ok {
+				ct.release(t)
+				delete(e.tsCache, old)
+			}
+		}
+		e.tsCache[tkey] = typesetter
+		e.tsOrder = append(e.tsOrder, tkey)
 	}
-	defer ct.release(typesetter)
 	var breaks []bool
 	if wholeWords && width > 0 {
 		e.breaks = lineBreaks(&e.seg, e.breaks, text)
@@ -1554,4 +1574,30 @@ func (e *coreText) forgetFonts() {
 	clear(e.native)
 	clear(e.oblique)
 	clear(e.color)
+}
+
+type tsKey struct {
+	font    uintptr
+	rtl     bool
+	lang    string
+	text    string
+	italic  bool
+	spacing float32
+	kernOff bool
+	spans   string
+}
+
+const tsMax = 8192
+
+// spanKey folds spans into a comparable string: an attribute it leaves out
+// would let a text of one style take the layout of another's.
+func spanKey(spans []Span) string {
+	if len(spans) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, sp := range spans {
+		fmt.Fprintf(&b, "%d|%s|%g|%d|%v|%g|%s|%s;", sp.End, sp.Family, sp.Size, sp.Weight, sp.Italic, sp.LetterSpacing, sp.Features, sp.Lang)
+	}
+	return b.String()
 }
