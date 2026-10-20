@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -302,5 +303,38 @@ func TestDiffFrameAllocs(t *testing.T) {
 	// area (raster's team).
 	if steady > 2 || warm > 2 {
 		t.Errorf("a steady frame allocates %.0f times, and one scrolling within rows laid out %.0f, not 2", steady, warm)
+	}
+}
+
+// BenchmarkFrameListInScroll measures a frame of a list of truncated text
+// inside a scrolling ancestor, each row a title and a line of it, as a file
+// list or a table of documents. It is the shape where a list's own height
+// says nothing about its view: the ancestor scrolls the content, so the
+// list is as tall as all its rows. Read as the view, that height builds and
+// lays out every one of them.
+func BenchmarkFrameListInScroll(b *testing.B) {
+	for _, n := range []int{20, 740} {
+		b.Run(fmt.Sprintf("rows=%d", n), func(b *testing.B) {
+			title := strings.Repeat("a document title that is cut short ", 3)
+			var s ListState
+			tt := coreNewTester(func(c *context) {
+				coreColumn(c).Grow(1).Children(func() {
+					coreScroll(c).Grow(1).Children(func() {
+						coreList(c, &s, n, func(i int) {
+							coreBox(c).Height(62).Children(func() {
+								coreTextf(c, "%s %d", title, i)
+								coreTextf(c, "a line of the summary under it, cut where the row ends")
+							})
+						})
+					})
+				})
+			}, 860, 560)
+			tt.Frame()
+			tt.Frame()
+			b.ResetTimer()
+			for b.Loop() {
+				tt.Frame()
+			}
+		})
 	}
 }

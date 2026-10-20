@@ -610,6 +610,11 @@ func (s *ListState) plan(e *node, n int) (a, first, last int) {
 	if view <= 0 {
 		view = float64(e.c.h)
 	}
+	// See layoutList: inside a scrolling ancestor the list is as tall as its
+	// rows, so that ancestor's height is the view.
+	if h, ok := scrollingView(e); ok {
+		view = h
+	}
 	hs, gap := &s.heights, s.gap
 	a, y, above := s.anchor, s.padTop-s.inset, 0.0
 	switch r := s.req; {
@@ -1243,6 +1248,21 @@ func (s *ListState) focusedRow(e *node, n int) (int, bool) {
 // sets the size of the content and the offset. Without rows, what else was
 // built in the list shows, as a scroll container's content: a message that
 // it is empty, say.
+// scrollingView returns the height of the nearest ancestor that scrolls e
+// into view, and whether there is one: the room that ancestor shows is the
+// room e shows too.
+func scrollingView(e *node) (float64, bool) {
+	for a := e.parent; a != nil; a = a.parent {
+		if a.flags&flagScrollY == 0 {
+			continue
+		}
+		if h := float64(a.st.h); h > 0 {
+			return h, true
+		}
+	}
+	return 0, false
+}
+
 func (e *node) layoutList(w, h float32) {
 	f := e.list
 	s, n := f.s, f.n
@@ -1267,6 +1287,15 @@ func (e *node) layoutList(w, h float32) {
 	gap := float64(max(e.gapY, 0))
 	padTop, padBottom := float64(e.contentY()), float64(e.pad[2]+e.border[2])
 	H := float64(h)
+	// A list inside a scrolling ancestor is as tall as its rows: that
+	// ancestor scrolls the content, so nothing holds this one to a screen.
+	// Placing its rows against that height means placing every row against a
+	// view taller than any screen. The scrolling ancestor shows what this
+	// list shows, so its height is the view. A list hugging its content
+	// outside one keeps its content's height.
+	if ah, ok := scrollingView(e); ok {
+		H = ah
+	}
 	top, bottom := float64(e.border[0]), H-float64(e.border[2])
 	s.gap, s.padTop, s.border = gap, padTop, top
 	st.list = s
