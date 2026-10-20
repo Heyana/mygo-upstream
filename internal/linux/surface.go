@@ -444,6 +444,10 @@ var cursorNames = map[platform.Cursor]string{
 	platform.CursorResizeW: "w-resize", platform.CursorResizeColumn: "col-resize", platform.CursorResizeRow: "row-resize",
 	platform.CursorVerticalText: "vertical-text", platform.CursorCopy: "copy", platform.CursorAlias: "alias",
 	platform.CursorContextMenu: "context-menu", platform.CursorNone: "none",
+	// GTK names each of these the same way its theme file does.
+	platform.CursorWait: "wait", platform.CursorProgress: "progress",
+	platform.CursorCell: "cell", platform.CursorAllScroll: "all-scroll", platform.CursorNoDrop: "no-drop",
+	platform.CursorHelp: "help", platform.CursorZoomIn: "zoom-in", platform.CursorZoomOut: "zoom-out",
 }
 
 func (s *surface) SetCursor(c platform.Cursor) {

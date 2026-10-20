@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/internal/platform"
 )
 
 // boxes lays out view in a window w×h and returns the boxes of the
@@ -691,6 +693,48 @@ func TestDebugAndCursors(t *testing.T) {
 	img := tt.Image()
 	if c := img.RGBAAt(int(r.X), int(r.Y+20)); c.B < 150 {
 		t.Errorf("no outline on the box's edge: %v", c)
+	}
+}
+
+// TestEveryCursorReachesTheSurface points at a box with each pointer shape
+// and reads back what the surface was told: a shape the ui package drops, or
+// two that share a value, fail here. What each backend names it is
+// TestEveryCursorHasAName's business, in internal/platform.
+func TestEveryCursorReachesTheSurface(t *testing.T) {
+	cursors := []struct {
+		name   string
+		cursor Cursor
+	}{
+		{"default", CursorDefault}, {"pointer", CursorPointer}, {"text", CursorText},
+		{"move", CursorMove}, {"ew", CursorResizeEW}, {"ns", CursorResizeNS},
+		{"nwse", CursorResizeNWSE}, {"nesw", CursorResizeNESW}, {"not-allowed", CursorNotAllowed},
+		{"crosshair", CursorCrosshair}, {"grab", CursorGrab}, {"grabbing", CursorGrabbing},
+		{"resize-n", CursorResizeN}, {"resize-e", CursorResizeE}, {"resize-s", CursorResizeS},
+		{"resize-w", CursorResizeW}, {"resize-column", CursorResizeColumn}, {"resize-row", CursorResizeRow},
+		{"vertical-text", CursorVerticalText}, {"copy", CursorCopy}, {"alias", CursorAlias},
+		{"context-menu", CursorContextMenu}, {"none", CursorNone},
+		{"wait", CursorWait}, {"progress", CursorProgress}, {"cell", CursorCell},
+		{"all-scroll", CursorAllScroll}, {"no-drop", CursorNoDrop}, {"help", CursorHelp},
+		{"zoom-in", CursorZoomIn}, {"zoom-out", CursorZoomOut},
+	}
+	if len(cursors) != platform.CursorCount {
+		t.Fatalf("%d shapes listed, platform has %d", len(cursors), platform.CursorCount)
+	}
+	seen := map[Cursor]string{}
+	for _, c := range cursors {
+		if prev, ok := seen[c.cursor]; ok {
+			t.Errorf("%q and %q share the value %d", prev, c.name, c.cursor)
+		}
+		seen[c.cursor] = c.name
+
+		want := c.cursor
+		tt := coreNewTester(func(c *context) {
+			coreBox(c).Fill().Cursor(want)
+		}, 40, 40)
+		tt.Move(20, 20)
+		if got := tt.Cursor(); got != want {
+			t.Errorf("%q reached the surface as %d, want %d", c.name, got, want)
+		}
 	}
 }
 

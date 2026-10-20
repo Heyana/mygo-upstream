@@ -566,6 +566,22 @@ func cursorText(c Cursor) string {
 		return "grabbing"
 	case CursorNone:
 		return "none"
+	case CursorWait:
+		return "wait"
+	case CursorProgress:
+		return "progress"
+	case CursorCell:
+		return "cell"
+	case CursorAllScroll:
+		return "all-scroll"
+	case CursorNoDrop:
+		return "no-drop"
+	case CursorHelp:
+		return "help"
+	case CursorZoomIn:
+		return "zoom-in"
+	case CursorZoomOut:
+		return "zoom-out"
 	}
 	return "default"
 }

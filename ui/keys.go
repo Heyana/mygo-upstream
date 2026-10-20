@@ -151,4 +151,17 @@ const (
 	CursorContextMenu = Cursor(platform.CursorContextMenu)
 	// CursorNone hides the pointer over the element, as over a video.
 	CursorNone = Cursor(platform.CursorNone)
+	// CursorWait and CursorProgress show that the app is busy.
+	CursorWait     = Cursor(platform.CursorWait)
+	CursorProgress = Cursor(platform.CursorProgress)
+	// CursorCell picks a cell of a table, CursorAllScroll scrolls and drags
+	// in every direction, and CursorNoDrop refuses a drop.
+	CursorCell      = Cursor(platform.CursorCell)
+	CursorAllScroll = Cursor(platform.CursorAllScroll)
+	CursorNoDrop    = Cursor(platform.CursorNoDrop)
+	// CursorHelp asks for help, and CursorZoomIn and CursorZoomOut
+	// magnify or shrink what is clicked.
+	CursorHelp    = Cursor(platform.CursorHelp)
+	CursorZoomIn  = Cursor(platform.CursorZoomIn)
+	CursorZoomOut = Cursor(platform.CursorZoomOut)
 )

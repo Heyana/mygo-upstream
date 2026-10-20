@@ -624,7 +624,14 @@ var cursors = [...]string{
 	platform.CursorResizeS: "s-resize", platform.CursorResizeW: "w-resize", platform.CursorResizeColumn: "col-resize",
 	platform.CursorResizeRow: "row-resize", platform.CursorVerticalText: "vertical-text", platform.CursorCopy: "copy",
 	platform.CursorAlias: "alias", platform.CursorContextMenu: "context-menu", platform.CursorNone: "none",
+	platform.CursorWait: "wait", platform.CursorProgress: "progress", platform.CursorCell: "cell",
+	platform.CursorAllScroll: "all-scroll", platform.CursorNoDrop: "no-drop", platform.CursorHelp: "help",
+	platform.CursorZoomIn: "zoom-in", platform.CursorZoomOut: "zoom-out",
 }
+
+// A shape added without a name here would take the arrow silently, since
+// the array is indexed by the cursor's value.
+var _ = [1]struct{}{}[len(cursors)-platform.CursorCount]
 
 func (s *surface) SetCursor(c platform.Cursor) {
 	name := "default"

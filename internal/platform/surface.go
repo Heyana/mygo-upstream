@@ -474,4 +474,26 @@ const (
 	CursorAlias
 	CursorContextMenu
 	CursorNone
+	// CursorWait and CursorProgress show that the app is busy, the first
+	// over the whole window and the second over one control.
+	CursorWait
+	CursorProgress
+	// CursorCell, CursorAllScroll and CursorNoDrop show that a cell is
+	// picked, that anything may be scrolled and dragged, and that a drop
+	// is refused.
+	CursorCell
+	CursorAllScroll
+	CursorNoDrop
+	// CursorHelp is the question mark beside what asks for it, and
+	// CursorZoomIn and CursorZoomOut magnify or shrink what is clicked.
+	CursorHelp
+	CursorZoomIn
+	CursorZoomOut
+	// cursorCount is the number of shapes; a backend's table must answer
+	// for every one below it.
+	cursorCount
 )
+
+// CursorCount is how many pointer shapes there are, for a backend's table
+// to test its length against.
+const CursorCount = int(cursorCount)

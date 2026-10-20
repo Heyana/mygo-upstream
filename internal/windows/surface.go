@@ -319,6 +319,15 @@ func cursorHandle(c platform.Cursor) uintptr {
 		platform.CursorResizeN: 32645, platform.CursorResizeS: 32645, platform.CursorResizeE: 32644,
 		platform.CursorResizeW: 32644, platform.CursorResizeColumn: 32644, platform.CursorResizeRow: 32645,
 		platform.CursorVerticalText: 32513,
+		// IDC_WAIT, IDC_APPSTARTING (progress), IDC_HELP, IDC_SIZEALL
+		// (all-scroll) and IDC_NO (no-drop). Windows has neither a cell nor
+		// a zoom cursor: a cell takes the hand that points at it, as in a
+		// grid of Excel's, and zoom takes the resize of the axis it grows
+		// along.
+		platform.CursorWait: 32514, platform.CursorProgress: 32650, platform.CursorHelp: 32651,
+		platform.CursorAllScroll: 32646, platform.CursorNoDrop: 32648,
+		platform.CursorCell:   32649,
+		platform.CursorZoomIn: 32642, platform.CursorZoomOut: 32643,
 	}
 	if c == platform.CursorNone {
 		surfaceCursors[c] = 0 // SetCursor(NULL) hides it

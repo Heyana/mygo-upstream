@@ -370,12 +370,26 @@ var cursorSelectors = map[platform.Cursor]string{
 	platform.CursorCopy:         "dragCopyCursor",
 	platform.CursorAlias:        "dragLinkCursor",
 	platform.CursorContextMenu:  "contextualMenuCursor",
+	// macOS has no cell, wait, progress, all-scroll or help cursor: those
+	// take the arrow, the open hand or the pointing hand nearest to what
+	// they say. zoomInCursor and zoomOutCursor are macOS 15's, which
+	// cursorFallbacks stands in for.
+	platform.CursorCell:      "pointingHandCursor",
+	platform.CursorWait:      "arrowCursor",
+	platform.CursorProgress:  "arrowCursor",
+	platform.CursorAllScroll: "openHandCursor",
+	platform.CursorNoDrop:    "operationNotAllowedCursor",
+	platform.CursorHelp:      "contextualMenuCursor",
+	platform.CursorZoomIn:    "zoomInCursor",
+	platform.CursorZoomOut:   "zoomOutCursor",
 }
 
 // cursorFallbacks are the cursors of older macOS for those it lacks.
 var cursorFallbacks = map[platform.Cursor]string{
 	platform.CursorResizeColumn: "resizeLeftRightCursor",
 	platform.CursorResizeRow:    "resizeUpDownCursor",
+	platform.CursorZoomIn:       "crosshairCursor",
+	platform.CursorZoomOut:      "crosshairCursor",
 }
 
 // applyCursor sets the content's cursor, unless the pointer is over a
