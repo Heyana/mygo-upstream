@@ -633,6 +633,12 @@ func (s *ListState) plan(e *node, n int) (a, first, last int) {
 	if view <= 0 {
 		view = float64(e.c.h)
 	}
+	// See layoutList: inside a scrolling ancestor, the part of the list that
+	// ancestor shows is the view, from as far into it as it scrolled.
+	band := 0.0
+	if start, size, ok := shownBand(e); ok {
+		band, view = start, size
+	}
 	hs, gap := &s.heights, s.gap
 	a, y, above := s.anchor, s.padTop-s.inset, 0.0
 	switch r := s.req; {
@@ -647,6 +653,10 @@ func (s *ListState) plan(e *node, n int) (a, first, last int) {
 	case r.end || s.following:
 		a = n - 1
 		y = view - hs.height(a)
+	}
+	if band > 0 && !s.req.set && !s.req.end && !s.following {
+		// The rows the ancestor shows are those at the band it starts.
+		a, y = s.anchorAt(band)
 	}
 	last = a
 	for yy := y; last < n && yy < view && last-a < listMaxRows; last++ {
@@ -1292,6 +1302,35 @@ func (s *ListState) focusedRow(e *node, n int) (int, bool) {
 	return 0, false
 }
 
+// shownBand returns the part of e that the nearest scrolling ancestor shows,
+// in e's own content: how far past its top the band starts, and how tall it
+// is. ok is false when nothing but e scrolls it.
+func shownBand(e *node) (start, size float64, ok bool) {
+	for a := e.parent; a != nil; a = a.parent {
+		if a.flags&flagScrollY == 0 {
+			continue
+		}
+		view := float64(a.st.h)
+		if view <= 0 {
+			continue
+		}
+		// Where e's top is in the ancestor's content, and how far the
+		// ancestor shows past it: the band starts that far into e.
+		var top float64
+		for ch := e; ch != nil && ch != a; ch = ch.parent {
+			top += float64(ch.y)
+		}
+		above := float64(a.st.scrollY) - top
+		start = max(0, above)
+		end := above + view
+		if h := float64(e.st.h); h > 0 {
+			end = min(end, h)
+		}
+		return start, max(0, end-start), true
+	}
+	return 0, 0, false
+}
+
 // layoutList measures and places the rows of a List w×h from its place,
 // building those missing, pins the header of the section at the top, and
 // sets the size of the content and the offset. Without rows, what else was
@@ -1321,6 +1360,19 @@ func (e *node) layoutList(w, h float32) {
 	gap := float64(max(e.gapY, 0))
 	padTop, padBottom := float64(e.contentY()), float64(e.pad[2]+e.border[2])
 	H := float64(h)
+	// A list inside a scrolling ancestor is as tall as its rows: that
+	// ancestor scrolls the content, so nothing holds this one to a screen.
+	// Placing its rows against that height means placing every row against a
+	// view taller than any screen. What the ancestor shows of it is the room
+	// this list shows, from as far into it as that ancestor scrolled; its
+	// rows keep their place in the content, and the ancestor moves them. A
+	// list hugging its content outside one keeps its content's height.
+	band := 0.0
+	// A list taller than its own box scrolls itself, and reads its own
+	// offset: only one that hugs its rows takes the band to be its view.
+	if start, size, ok := shownBand(e); ok && e.contentH <= float64(e.st.h)+0.5 {
+		band, H = start, size
+	}
 	top, bottom := float64(e.border[0]), H-float64(e.border[2])
 	s.gap, s.padTop, s.border = gap, padTop, top
 	st.list = s
@@ -1405,8 +1457,13 @@ func (e *node) layoutList(w, h float32) {
 		}
 	default:
 		a = s.anchor
-		ensure(a)
 		ya = padTop - s.inset
+		if band > 0 {
+			// The band starts at band in the content: the row there is the
+			// one this place starts from.
+			a, ya = s.anchorAt(band)
+		}
+		ensure(a)
 	}
 
 	// Rows lo to hi are placed, row lo at yLo and row hi at yHi.
@@ -1427,7 +1484,7 @@ func (e *node) layoutList(w, h float32) {
 	// Keep the content's ends at the list's: the end may show above the
 	// bottom after rows went away, the start below the top after rows
 	// above turned out shorter than estimated.
-	for k := 0; k < 4 && !(lo == 0 && hi == n-1); k++ {
+	for k := 0; k < 4 && band == 0 && !(lo == 0 && hi == n-1); k++ {
 		if hi == n-1 && end() < H {
 			shift(H - end())
 		} else if lo == 0 && yLo > padTop {
@@ -1437,7 +1494,7 @@ func (e *node) layoutList(w, h float32) {
 		}
 		cover()
 	}
-	if lo == 0 && hi == n-1 {
+	if lo == 0 && hi == n-1 && band == 0 {
 		switch start := yLo - padTop; {
 		case end()-start <= H:
 			// The rows fit: Justify places them.
@@ -1469,21 +1526,26 @@ func (e *node) layoutList(w, h float32) {
 	// shows.
 	content := max(padTop+padBottom+hs.top(n, gap)-gap, H)
 	scroll := max(0, min(padTop+hs.top(lo, gap)-yLo, content-H))
+	if band > 0 {
+		// The rows show from the band on: the list's content is offset by
+		// that much, which placing by it puts the rows where they go.
+		scroll = band
+	}
 	y := yLo
 	for i := lo; i <= hi; i++ {
-		f.rows[f.at[i]].y = y
+		f.rows[f.at[i]].y = y + band
 		y += ht(i) + gap
 	}
 	for k := range f.rows {
 		if r := &f.rows[k]; r.i < lo || r.i > hi {
-			r.y = padTop + hs.top(r.i, gap) - scroll
+			r.y = padTop + hs.top(r.i, gap) - scroll + band
 		}
 	}
 
 	// The rows in view, the first of which anchors the place.
 	first, last := -1, -1
 	for i := lo; i <= hi; i++ {
-		if y := f.rows[f.at[i]].y; y+ht(i) > top && y < bottom {
+		if y := f.rows[f.at[i]].y - band; y+ht(i) > top && y < bottom {
 			if first < 0 {
 				first = i
 			}
@@ -1493,7 +1555,7 @@ func (e *node) layoutList(w, h float32) {
 	if first < 0 {
 		first, last = a, a-1
 	}
-	inset := padTop - f.rows[f.at[first]].y
+	inset := padTop - (f.rows[f.at[first]].y - band)
 	var pinned *node
 	if s.Header != nil && last >= first {
 		pinned = e.pinHeader(first, hi, top)
@@ -1536,11 +1598,14 @@ func (e *node) layoutList(w, h float32) {
 		pinned.flags |= flagAbsolute
 		e.forgetIntrinsic()
 	}
+	// How far the list's own offset moves its rows: none inside a scrolling
+	// ancestor, which moves them instead.
+	own := scroll - band
 	e.contentW, e.contentH = float64(cw+e.padX()), content
-	e.scrollBase = scroll
-	st.scrollTo(st.scrollX, scroll)
+	e.scrollBase = own
+	st.scrollTo(st.scrollX, own)
 	s.inset = inset
-	s.remember(e, first, last, hi == n-1 && end()-glide <= H+0.5, scroll)
+	s.remember(e, first, last, hi == n-1 && end()-glide <= H+0.5, own)
 }
 
 // glideToEnd moves the rows of a list following its end with a
