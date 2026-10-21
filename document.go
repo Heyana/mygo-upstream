@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -70,6 +71,10 @@ type DocumentsOptions[T any] struct {
 	// it, or typing a character and deleting it, leaves the document
 	// unedited. Without it, every Set and Changed edits the document
 	// until it is saved.
+	//
+	// It is called with no document lock held, so an implementation may
+	// read the document it is comparing for (Document.Content and the
+	// rest) — doing so used to deadlock, and is legal now.
 	Equal func(a, b T) bool
 	// Window creates the window that shows a document, on the main
 	// thread. MyGo sets its title, represented file and edited state,
@@ -253,10 +258,15 @@ func (d *Document[T]) Set(content T) {
 	d.content = content
 	d.changes++
 	edited := true
-	if eq := d.ds.opts.Equal; eq != nil && d.savedKnown {
-		edited = !eq(content, d.saved)
-	}
+	// Equal is the app's and may read the document, so it is called with
+	// the lock down: a document holding it would deadlock on the mutex its
+	// own Content takes (the same mistake ImageCache.ask made, 0487c37b).
+	eq, saved := d.ds.opts.Equal, d.saved
+	known := d.savedKnown
 	d.mu.Unlock()
+	if eq != nil && known {
+		edited = !eq(content, saved)
+	}
 	d.changed(edited)
 }
 
@@ -310,13 +320,49 @@ func (d *Document[T]) capture() docSnapshot {
 }
 
 // markSaved records that the file has s. d.mu is held.
-func (d *Document[T]) markSaved(s docSnapshot) {
+//
+// It returns whether Equal still has to be consulted, and the two values it
+// would be given: Equal is the app's and may read the document, so it is not
+// called here (see settleSaved).
+func (d *Document[T]) markSaved(s docSnapshot) (check bool, content, saved any) {
 	v := s.value.(T)
 	d.saved, d.savedKnown = v, true
 	d.edited = d.changes != s.at
 	if eq := d.ds.opts.Equal; eq != nil && d.edited {
-		d.edited = !eq(d.content, v)
+		return true, d.content, v
 	}
+	return false, content, saved
+}
+
+// settleSaved consults Equal, off the document's lock, and records what it
+// says about the document being edited. It is markSaved's second half, called
+// once the lock markSaved ran under is down: it takes the lock back for the
+// write, by which time the app's Equal has already returned.
+func (d *Document[T]) settleSaved(check bool, content, saved any) {
+	if !check || !d.ds.opts.Equal(content.(T), saved.(T)) {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// The identities, not the values: Equal already said the two are equal,
+	// so a document still holding these is still unedited. Comparing the
+	// values would panic on every content Equal exists for — a struct with a
+	// slice, an image's pixels — since a T that satisfies == makes Equal
+	// pointless.
+	if d.savedKnown && sameValue(d.saved, saved) && sameValue(d.content, content) {
+		d.edited = false
+	}
+}
+
+// sameValue reports whether a and b are the same value, for content whose
+// type cannot be compared. Values of a comparable type are compared; the rest
+// are compared by identity, which is what this asks: whether the document
+// holds the value Equal was given, not one that equals it.
+func sameValue(a, b any) bool {
+	if reflect.TypeOf(a).Comparable() {
+		return a == b
+	}
+	return reflect.ValueOf(a).Pointer() == reflect.ValueOf(b).Pointer()
 }
 
 // replace makes v, read from the file, the content. d.mu is held.
@@ -349,7 +395,8 @@ type docSnapshot struct {
 // machinery.
 type docOps interface {
 	capture() docSnapshot
-	markSaved(s docSnapshot)
+	markSaved(s docSnapshot) (check bool, content, saved any)
+	settleSaved(check bool, content, saved any)
 	replace(v any)
 	restore(v any)
 	makeWindow() *Window
